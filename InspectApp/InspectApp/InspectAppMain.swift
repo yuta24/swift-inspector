@@ -11,5 +11,7 @@ struct InspectAppMain: App {
                 .frame(minWidth: 960, minHeight: 600)
                 .onAppear { model.startBrowsing() }
         }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: true))
     }
 }

@@ -8,8 +8,10 @@ final class InspectAppModel: ObservableObject {
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
     @Published var selectedNodeID: UUID?
+    @Published var hierarchyFilter: String = ""
     @Published var status: String = "idle"
     @Published var isConnected: Bool = false
+    @Published var connectedDeviceName: String = ""
 
     private let browser = InspectBrowser()
     private var client: InspectClient?
@@ -22,15 +24,17 @@ final class InspectAppModel: ObservableObject {
 
     func startBrowsing() {
         browser.onChange = { [weak self] endpoints in
-            guard let self else { return }
-            let merged = endpoints.map { endpoint -> InspectEndpoint in
-                var copy = endpoint
-                if copy.id == self.connectedEndpointID {
-                    copy.isConnected = true
+            Task { @MainActor in
+                guard let self else { return }
+                let merged = endpoints.map { endpoint -> InspectEndpoint in
+                    var copy = endpoint
+                    if copy.id == self.connectedEndpointID {
+                        copy.isConnected = true
+                    }
+                    return copy
                 }
-                return copy
+                self.discovered = merged
             }
-            self.discovered = merged
         }
         browser.start()
         status = "browsing"
@@ -72,6 +76,7 @@ final class InspectAppModel: ObservableObject {
         client = nil
         isConnected = false
         connectedEndpointID = nil
+        connectedDeviceName = ""
         markConnected(endpointID: nil)
     }
 
@@ -82,7 +87,8 @@ final class InspectAppModel: ObservableObject {
     private func handle(_ message: InspectMessage) {
         switch message {
         case let .handshake(handshake):
-            status = "connected: \(handshake.deviceName) (\(handshake.systemName) \(handshake.systemVersion))"
+            connectedDeviceName = "\(handshake.deviceName) — \(handshake.systemName) \(handshake.systemVersion)"
+            status = "connected: \(handshake.deviceName)"
         case let .hierarchy(roots):
             self.roots = roots
             if let id = selectedNodeID, Self.findNode(id: id, in: roots) == nil {
