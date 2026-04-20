@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "InspectApp",
     platforms: [
-        .macOS(.v13),
+        .macOS(.v14),
     ],
     dependencies: [
         .package(path: "../InspectCore"),
