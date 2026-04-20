@@ -34,6 +34,42 @@ final class ViewNodeTests: XCTestCase {
         XCTAssertEqual(roots, [parent])
     }
 
+    func testNaNSanitization() throws {
+        let node = ViewNode(
+            className: "UIView",
+            frame: CGRect(x: Double.nan, y: .infinity, width: -.infinity, height: 100),
+            alpha: .nan,
+            cornerRadius: .nan,
+            borderWidth: .infinity
+        )
+        // NaN/Infinity should be replaced with 0, negative width clamped to 0
+        XCTAssertEqual(node.frame.origin.x, 0)
+        XCTAssertEqual(node.frame.origin.y, 0)
+        XCTAssertEqual(node.frame.size.width, 0)
+        XCTAssertEqual(node.frame.size.height, 100)
+        XCTAssertEqual(node.alpha, 0)
+        XCTAssertEqual(node.cornerRadius, 0)
+        XCTAssertEqual(node.borderWidth, 0)
+
+        // Must encode without throwing
+        let serializer = JSONMessageSerializer()
+        let data = try serializer.encode(.hierarchy(roots: [node]))
+        let decoded = try serializer.decode(data)
+        guard case let .hierarchy(roots) = decoded else {
+            XCTFail("expected hierarchy case")
+            return
+        }
+        XCTAssertEqual(roots.first?.cornerRadius, 0)
+    }
+
+    func testRGBAColorNaNSanitization() {
+        let color = RGBAColor(red: .nan, green: .infinity, blue: -.infinity, alpha: 0.5)
+        XCTAssertEqual(color.red, 0)
+        XCTAssertEqual(color.green, 0)
+        XCTAssertEqual(color.blue, 0)
+        XCTAssertEqual(color.alpha, 0.5)
+    }
+
     func testFramingRoundtrip() {
         let payload = Data("hello".utf8)
         let framed = Framing.frame(payload)

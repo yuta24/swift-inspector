@@ -1,6 +1,9 @@
 import Foundation
 import Network
 import InspectCore
+import os.log
+
+private let logger = Logger(subsystem: "swift-inspector", category: "model")
 
 @MainActor
 final class InspectAppModel: ObservableObject {
@@ -93,16 +96,21 @@ final class InspectAppModel: ObservableObject {
     private func handle(_ message: InspectMessage) {
         switch message {
         case let .handshake(handshake):
+            logger.info("Model received handshake: \(handshake.deviceName, privacy: .public) \(handshake.systemName, privacy: .public) \(handshake.systemVersion, privacy: .public)")
             connectedDeviceName = "\(handshake.deviceName) — \(handshake.systemName) \(handshake.systemVersion)"
             status = "connected: \(handshake.deviceName)"
         case let .hierarchy(roots):
+            let nodeCount = Self.countNodes(in: roots)
+            logger.info("Model received hierarchy: \(roots.count) root(s), \(nodeCount) total node(s)")
             self.roots = roots
             if let id = selectedNodeID, Self.findNode(id: id, in: roots) == nil {
+                logger.debug("Previously selected node not found, selecting first root")
                 selectedNodeID = roots.first?.id
             } else if selectedNodeID == nil {
                 selectedNodeID = roots.first?.id
             }
         case let .error(message):
+            logger.error("Model received error: \(message, privacy: .public)")
             status = "error: \(message)"
         case .requestHierarchy:
             break
@@ -115,6 +123,10 @@ final class InspectAppModel: ObservableObject {
             copy.isConnected = (endpoint.id == endpointID)
             return copy
         }
+    }
+
+    private static func countNodes(in nodes: [ViewNode]) -> Int {
+        nodes.reduce(0) { $0 + 1 + countNodes(in: $1.children) }
     }
 
     private static func findNode(id: UUID, in nodes: [ViewNode]) -> ViewNode? {

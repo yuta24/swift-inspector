@@ -8,10 +8,14 @@ public struct RGBAColor: Codable, Hashable, Sendable {
     public let alpha: Double
 
     public init(red: Double, green: Double, blue: Double, alpha: Double) {
-        self.red = red
-        self.green = green
-        self.blue = blue
-        self.alpha = alpha
+        self.red = Self.sanitize(red)
+        self.green = Self.sanitize(green)
+        self.blue = Self.sanitize(blue)
+        self.alpha = Self.sanitize(alpha)
+    }
+
+    private static func sanitize(_ value: Double) -> Double {
+        value.isFinite ? value : 0
     }
 }
 

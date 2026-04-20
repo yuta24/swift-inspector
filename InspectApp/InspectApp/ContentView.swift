@@ -228,7 +228,10 @@ private struct InspectorView: View {
 
                     FrameSection(frame: node.frame)
                     AppearanceSection(node: node)
+                    LayerSection(node: node)
+                    InteractionSection(node: node)
                     AccessibilitySection(node: node)
+                    TypePropertiesSection(properties: node.properties)
                     ChildrenSection(count: node.children.count)
                 }
                 .padding(16)
@@ -311,6 +314,12 @@ private struct AppearanceSection: View {
                         PropertyValue("nil")
                     }
                 }
+                if let modeName = node.contentModeName {
+                    HStack(spacing: 8) {
+                        PropertyLabel("contentMode")
+                        PropertyValue(modeName)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
@@ -340,6 +349,121 @@ private struct AlphaBar: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(.tint)
                     .frame(width: proxy.size.width * alpha)
+            }
+        }
+    }
+}
+
+// MARK: - Layer Section
+
+private struct LayerSection: View {
+    let node: ViewNode
+
+    var body: some View {
+        let hasContent = node.clipsToBounds || node.cornerRadius > 0
+            || node.borderWidth > 0 || node.borderColor != nil
+        if hasContent {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        PropertyLabel("clipsToBounds")
+                        PropertyValue("\(node.clipsToBounds)")
+                    }
+                    if node.cornerRadius > 0 {
+                        HStack(spacing: 8) {
+                            PropertyLabel("cornerRadius")
+                            PropertyValue(String(format: "%g", node.cornerRadius))
+                        }
+                    }
+                    if node.borderWidth > 0 {
+                        HStack(spacing: 8) {
+                            PropertyLabel("borderWidth")
+                            PropertyValue(String(format: "%g", node.borderWidth))
+                        }
+                    }
+                    if let color = node.borderColor {
+                        HStack(spacing: 8) {
+                            PropertyLabel("borderColor")
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(color.swiftUIColor)
+                                .frame(width: 14, height: 14)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .stroke(.quaternary, lineWidth: 0.5)
+                                )
+                            PropertyValue(String(
+                                format: "rgba(%.2f, %.2f, %.2f, %.2f)",
+                                color.red, color.green, color.blue, color.alpha
+                            ))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } label: {
+                SectionHeader("Layer", icon: "square.stack.3d.up")
+            }
+        }
+    }
+}
+
+// MARK: - Interaction Section
+
+private struct InteractionSection: View {
+    let node: ViewNode
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    PropertyLabel("userInteraction")
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(node.isUserInteractionEnabled ? Color.green : Color.red)
+                            .frame(width: 6, height: 6)
+                        PropertyValue(node.isUserInteractionEnabled ? "true" : "false")
+                    }
+                }
+                if let isEnabled = node.isEnabled {
+                    HStack(spacing: 8) {
+                        PropertyLabel("isEnabled")
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(isEnabled ? Color.green : Color.red)
+                                .frame(width: 6, height: 6)
+                            PropertyValue(isEnabled ? "true" : "false")
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        } label: {
+            SectionHeader("Interaction", icon: "hand.tap")
+        }
+    }
+}
+
+// MARK: - Type-Specific Properties Section
+
+private struct TypePropertiesSection: View {
+    let properties: [String: String]
+
+    var body: some View {
+        if !properties.isEmpty {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(properties.keys.sorted(), id: \.self) { key in
+                        HStack(spacing: 8) {
+                            PropertyLabel(key)
+                            PropertyValue(properties[key] ?? "")
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } label: {
+                SectionHeader("Properties", icon: "list.bullet.rectangle")
             }
         }
     }
