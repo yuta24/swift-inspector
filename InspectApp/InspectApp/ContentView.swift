@@ -228,6 +228,7 @@ private struct InspectorView: View {
 
                     FrameSection(frame: node.frame)
                     AppearanceSection(node: node)
+                    AccessibilitySection(node: node)
                     ChildrenSection(count: node.children.count)
                 }
                 .padding(16)
@@ -339,6 +340,37 @@ private struct AlphaBar: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(.tint)
                     .frame(width: proxy.size.width * alpha)
+            }
+        }
+    }
+}
+
+// MARK: - Accessibility Section
+
+private struct AccessibilitySection: View {
+    let node: ViewNode
+
+    var body: some View {
+        if node.accessibilityIdentifier != nil || node.accessibilityLabel != nil {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let identifier = node.accessibilityIdentifier {
+                        HStack(spacing: 8) {
+                            PropertyLabel("identifier")
+                            PropertyValue(identifier)
+                        }
+                    }
+                    if let label = node.accessibilityLabel {
+                        HStack(spacing: 8) {
+                            PropertyLabel("label")
+                            PropertyValue(label)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } label: {
+                SectionHeader("Accessibility", icon: "accessibility")
             }
         }
     }

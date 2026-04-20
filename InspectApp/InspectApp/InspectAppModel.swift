@@ -8,7 +8,7 @@ final class InspectAppModel: ObservableObject {
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
     @Published var selectedNodeID: UUID?
-    @Published var hierarchyFilter: String = ""
+    @Published var hierarchyFilter = HierarchyFilter()
     @Published var status: String = "idle"
     @Published var isConnected: Bool = false
     @Published var connectedDeviceName: String = ""

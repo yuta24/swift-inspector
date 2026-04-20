@@ -64,12 +64,20 @@ public enum HierarchyScanner {
             )
         }
 
+        let accID = view.accessibilityIdentifier?.isEmpty == false ? view.accessibilityIdentifier : nil
+        let accLabel: String? = {
+            let label = view.accessibilityLabel
+            return (label?.isEmpty == false) ? label : nil
+        }()
+
         return ViewNode(
             className: String(describing: type(of: view)),
             frame: view.frame,
             isHidden: view.isHidden,
             alpha: Double(view.alpha),
             backgroundColor: view.backgroundColor.flatMap(RGBAColor.init(uiColor:)),
+            accessibilityIdentifier: accID,
+            accessibilityLabel: accLabel,
             screenshot: groupScreenshot,
             soloScreenshot: soloScreenshot,
             children: children

@@ -3,12 +3,14 @@ import InspectCore
 
 struct HierarchyNodeRow: View {
     let node: ViewNode
-    var highlight: String = ""
+    var filter = HierarchyFilter()
+    var isDimmed: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
             swatch
             classNameView
+            accessibilityBadge
             if node.isHidden {
                 Image(systemName: "eye.slash")
                     .font(.caption2)
@@ -21,26 +23,35 @@ struct HierarchyNodeRow: View {
                     .monospacedDigit()
             }
         }
-        .opacity(node.isHidden ? 0.5 : 1.0)
+        .opacity(isDimmed ? 0.4 : (node.isHidden ? 0.5 : 1.0))
     }
 
     @ViewBuilder
     private var classNameView: some View {
-        if !highlight.isEmpty,
-           node.className.localizedCaseInsensitiveContains(highlight) {
-            Text(node.className)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(.yellow)
+        let textHighlight = !isDimmed && !filter.text.isEmpty
+            && node.className.localizedCaseInsensitiveContains(filter.text)
+        Text(node.className)
+            .font(.system(.callout, design: .monospaced))
+            .foregroundStyle(textHighlight ? .yellow : (node.isHidden ? .secondary : .primary))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(node.className)
+    }
+
+    @ViewBuilder
+    private var accessibilityBadge: some View {
+        if let accID = node.accessibilityIdentifier {
+            let textHighlight = !isDimmed && !filter.text.isEmpty
+                && accID.localizedCaseInsensitiveContains(filter.text)
+            Text(accID)
+                .font(.caption2)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(textHighlight ? Color.yellow.opacity(0.3) : Color.blue.opacity(0.15))
+                .cornerRadius(3)
+                .foregroundStyle(textHighlight ? .primary : .secondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
-                .help(node.className)
-        } else {
-            Text(node.className)
-                .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(node.isHidden ? .secondary : .primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(node.className)
+                .help("accessibilityIdentifier: \(accID)")
         }
     }
 
@@ -61,5 +72,4 @@ struct HierarchyNodeRow: View {
             }
         }
     }
-
 }

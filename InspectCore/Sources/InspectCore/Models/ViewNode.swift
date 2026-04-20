@@ -8,6 +8,8 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
     public let isHidden: Bool
     public let alpha: Double
     public let backgroundColor: RGBAColor?
+    public let accessibilityIdentifier: String?
+    public let accessibilityLabel: String?
     /// Full screenshot including subviews (group screenshot).
     public let screenshot: Data?
     /// Screenshot of this layer only, excluding subviews (solo screenshot).
@@ -23,6 +25,8 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         isHidden: Bool = false,
         alpha: Double = 1.0,
         backgroundColor: RGBAColor? = nil,
+        accessibilityIdentifier: String? = nil,
+        accessibilityLabel: String? = nil,
         screenshot: Data? = nil,
         soloScreenshot: Data? = nil,
         children: [ViewNode] = []
@@ -33,6 +37,8 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         self.isHidden = isHidden
         self.alpha = alpha
         self.backgroundColor = backgroundColor
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.accessibilityLabel = accessibilityLabel
         self.screenshot = screenshot
         self.soloScreenshot = soloScreenshot
         self.children = children
