@@ -156,15 +156,16 @@ public final class InspectListener {
 
     private static func defaultServiceName() -> String {
         #if canImport(UIKit)
-        return UIDevice.current.name
+        return "\(DeviceModel.marketingName()) (\(UIDevice.current.systemName) \(UIDevice.current.systemVersion))"
         #else
-        return ProcessInfo.processInfo.hostName
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(ProcessInfo.processInfo.hostName) (macOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion))"
         #endif
     }
 
     private static func deviceName() -> String {
         #if canImport(UIKit)
-        return UIDevice.current.name
+        return DeviceModel.marketingName()
         #else
         return ProcessInfo.processInfo.hostName
         #endif

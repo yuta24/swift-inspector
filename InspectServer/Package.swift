@@ -12,12 +12,14 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../InspectCore"),
+        .package(url: "https://github.com/devicekit/DeviceKit.git", from: "5.0.0"),
     ],
     targets: [
         .target(
             name: "InspectServer",
             dependencies: [
                 .product(name: "InspectCore", package: "InspectCore"),
+                .product(name: "DeviceKit", package: "DeviceKit"),
             ]
         ),
     ]
