@@ -23,6 +23,11 @@ struct InspectAppMain: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var model: InspectAppModel?
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Ensure cleanup runs on MainActor synchronously before the process exits
         let model = self.model
