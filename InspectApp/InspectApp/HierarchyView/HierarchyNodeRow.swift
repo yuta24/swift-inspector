@@ -20,11 +20,6 @@ struct HierarchyNodeRow: View {
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
-            Spacer(minLength: 4)
-            Text(frameDescription)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
         }
         .opacity(node.isHidden ? 0.5 : 1.0)
     }
@@ -34,12 +29,18 @@ struct HierarchyNodeRow: View {
         if !highlight.isEmpty,
            node.className.localizedCaseInsensitiveContains(highlight) {
             Text(node.className)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(.callout, design: .monospaced))
                 .foregroundStyle(.yellow)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(node.className)
         } else {
             Text(node.className)
-                .font(.system(.body, design: .monospaced))
+                .font(.system(.callout, design: .monospaced))
                 .foregroundStyle(node.isHidden ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(node.className)
         }
     }
 
@@ -61,11 +62,4 @@ struct HierarchyNodeRow: View {
         }
     }
 
-    private var frameDescription: String {
-        let f = node.frame
-        return String(
-            format: "(%g, %g, %g, %g)",
-            f.origin.x, f.origin.y, f.size.width, f.size.height
-        )
-    }
 }

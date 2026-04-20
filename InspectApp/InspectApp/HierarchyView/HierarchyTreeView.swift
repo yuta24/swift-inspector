@@ -16,7 +16,7 @@ struct HierarchyTreeView: View {
                     }
                 }
             }
-            .listStyle(.inset)
+            .listStyle(.sidebar)
             .overlay {
                 if roots.isEmpty {
                     PlaceholderView(
