@@ -4,6 +4,7 @@ public enum InspectMessage: Codable, Sendable {
     case handshake(Handshake)
     case requestHierarchy
     case hierarchy(roots: [ViewNode])
+    case highlightView(ident: UUID?)
     case error(String)
 
     public struct Handshake: Codable, Hashable, Sendable {

@@ -21,6 +21,10 @@ struct HierarchyTreeView: View {
                 }
             }
             .listStyle(.sidebar)
+            .onKeyPress(.escape) {
+                selection = nil
+                return .handled
+            }
             .overlay {
                 if roots.isEmpty {
                     PlaceholderView(

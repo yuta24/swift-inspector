@@ -5,6 +5,8 @@ import InspectCore
 @MainActor
 public enum HierarchyScanner {
     public static func captureAllWindows(captureScreenshots: Bool = true) -> [ViewNode] {
+        ViewIdentRegistry.shared.clear()
+
         let windows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap { $0.windows }
@@ -76,7 +78,11 @@ public enum HierarchyScanner {
 
         let properties = Self.extractProperties(from: view)
 
+        let nodeIdent = UUID()
+        ViewIdentRegistry.shared.register(view: view, ident: nodeIdent)
+
         return ViewNode(
+            ident: nodeIdent,
             className: String(describing: type(of: view)),
             frame: view.frame,
             isHidden: view.isHidden,

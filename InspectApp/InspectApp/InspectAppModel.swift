@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Network
 import InspectCore
 import os.log
@@ -19,10 +20,21 @@ final class InspectAppModel: ObservableObject {
     private let browser = InspectBrowser()
     private var client: InspectClient?
     private var connectedEndpointID: InspectEndpoint.ID?
+    private var highlightCancellable: AnyCancellable?
 
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
         return Self.findNode(id: id, in: roots)
+    }
+
+    init() {
+        highlightCancellable = $selectedNodeID
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] nodeID in
+                guard let self, self.isConnected else { return }
+                self.client?.send(.highlightView(ident: nodeID))
+            }
     }
 
     func startBrowsing() {
@@ -75,6 +87,7 @@ final class InspectAppModel: ObservableObject {
     }
 
     func disconnect() {
+        client?.send(.highlightView(ident: nil))
         client?.disconnect()
         client = nil
         isConnected = false
@@ -91,6 +104,14 @@ final class InspectAppModel: ObservableObject {
 
     func requestHierarchy() {
         client?.send(.requestHierarchy)
+    }
+
+    func highlightSelectedNode() {
+        client?.send(.highlightView(ident: selectedNodeID))
+    }
+
+    func clearHighlight() {
+        client?.send(.highlightView(ident: nil))
     }
 
     private func handle(_ message: InspectMessage) {
@@ -112,7 +133,7 @@ final class InspectAppModel: ObservableObject {
         case let .error(message):
             logger.error("Model received error: \(message, privacy: .public)")
             status = "error: \(message)"
-        case .requestHierarchy:
+        case .requestHierarchy, .highlightView:
             break
         }
     }

@@ -119,6 +119,8 @@ final class InspectClient {
                             logger.error("Client received error message: \(msg, privacy: .public)")
                         case .requestHierarchy:
                             logger.debug("Client received requestHierarchy (unexpected)")
+                        case .highlightView:
+                            logger.debug("Client received highlightView (unexpected)")
                         }
                         self.onMessage?(message)
                     } catch {

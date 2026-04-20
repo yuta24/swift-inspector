@@ -147,6 +147,11 @@ public final class InspectListener {
                 logger.info("Total node count: \(nodeCount)")
                 self.send(.hierarchy(roots: roots), on: connection)
             }
+        case .highlightView(let ident):
+            logger.info("Received highlightView: \(ident?.uuidString ?? "nil", privacy: .public)")
+            Task { @MainActor in
+                Self.applyHighlight(ident: ident)
+            }
         case .handshake, .hierarchy, .error:
             logger.debug("Server ignoring message: \(String(describing: message).prefix(80), privacy: .public)")
             break
@@ -210,6 +215,17 @@ public final class InspectListener {
         for root in roots {
             check(root)
         }
+    }
+
+    @MainActor
+    private static func applyHighlight(ident: UUID?) {
+        #if canImport(UIKit)
+        if let ident {
+            HighlightOverlay.highlight(viewWithIdent: ident)
+        } else {
+            HighlightOverlay.clear()
+        }
+        #endif
     }
 
     @MainActor
