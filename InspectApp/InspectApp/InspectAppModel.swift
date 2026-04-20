@@ -80,6 +80,12 @@ final class InspectAppModel: ObservableObject {
         markConnected(endpointID: nil)
     }
 
+    func shutdown() {
+        disconnect()
+        browser.stop()
+        status = "idle"
+    }
+
     func requestHierarchy() {
         client?.send(.requestHierarchy)
     }

@@ -11,20 +11,57 @@ public enum HierarchyScanner {
             .sorted { $0.windowLevel.rawValue < $1.windowLevel.rawValue }
 
         return windows.map { window in
-            buildNode(from: window, isRoot: true, captureScreenshots: captureScreenshots)
+            let windowCapture: (CGImage, CGFloat)?
+            if captureScreenshots {
+                windowCapture = ScreenshotCapture.captureWindow(window)
+            } else {
+                windowCapture = nil
+            }
+            return buildNode(
+                from: window,
+                window: window,
+                windowCapture: windowCapture,
+                captureScreenshots: captureScreenshots
+            )
         }
     }
 
-    static func buildNode(from view: UIView, isRoot: Bool, captureScreenshots: Bool) -> ViewNode {
-        let screenshot: Data?
-        if captureScreenshots && isRoot {
-            screenshot = ScreenshotCapture.screenshot(of: view)
+    static func buildNode(
+        from view: UIView,
+        window: UIWindow,
+        windowCapture: (CGImage, CGFloat)?,
+        captureScreenshots: Bool
+    ) -> ViewNode {
+        let groupScreenshot: Data?
+        let soloScreenshot: Data?
+
+        if captureScreenshots {
+            // Group screenshot: crop from window capture (includes subviews)
+            if let (windowImage, scale) = windowCapture {
+                groupScreenshot = ScreenshotCapture.crop(
+                    from: windowImage,
+                    scale: scale,
+                    view: view,
+                    window: window
+                )
+            } else {
+                groupScreenshot = nil
+            }
+
+            // Solo screenshot: this layer only, sublayers hidden
+            soloScreenshot = ScreenshotCapture.soloScreenshot(of: view)
         } else {
-            screenshot = nil
+            groupScreenshot = nil
+            soloScreenshot = nil
         }
 
         let children = view.subviews.map {
-            buildNode(from: $0, isRoot: false, captureScreenshots: captureScreenshots)
+            buildNode(
+                from: $0,
+                window: window,
+                windowCapture: windowCapture,
+                captureScreenshots: captureScreenshots
+            )
         }
 
         return ViewNode(
@@ -33,7 +70,8 @@ public enum HierarchyScanner {
             isHidden: view.isHidden,
             alpha: Double(view.alpha),
             backgroundColor: view.backgroundColor.flatMap(RGBAColor.init(uiColor:)),
-            screenshot: screenshot,
+            screenshot: groupScreenshot,
+            soloScreenshot: soloScreenshot,
             children: children
         )
     }

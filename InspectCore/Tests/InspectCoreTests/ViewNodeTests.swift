@@ -10,6 +10,7 @@ final class ViewNodeTests: XCTestCase {
             alpha: 1.0,
             backgroundColor: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1),
             screenshot: nil,
+            soloScreenshot: nil,
             children: []
         )
         let parent = ViewNode(
@@ -19,6 +20,7 @@ final class ViewNodeTests: XCTestCase {
             alpha: 0.5,
             backgroundColor: nil,
             screenshot: Data([0x01, 0x02, 0x03]),
+            soloScreenshot: Data([0x04, 0x05]),
             children: [child]
         )
 

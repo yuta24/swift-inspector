@@ -14,7 +14,8 @@ struct ContentView: View {
             MainContentView(
                 node: model.selectedNode,
                 roots: model.roots,
-                contentMode: $contentMode
+                contentMode: $contentMode,
+                selectedNodeID: $model.selectedNodeID
             )
         }
         .inspector(isPresented: $showInspector) {
@@ -156,6 +157,7 @@ private struct MainContentView: View {
     let node: ViewNode?
     let roots: [ViewNode]
     @Binding var contentMode: ContentMode
+    @Binding var selectedNodeID: UUID?
 
     var body: some View {
         switch contentMode {
@@ -169,7 +171,10 @@ private struct MainContentView: View {
                     message: "Connect to a device and capture a snapshot."
                 )
             } else {
-                SceneViewContainer(roots: roots)
+                SceneViewContainer(
+                    roots: roots,
+                    selectedNodeID: $selectedNodeID
+                )
             }
         }
     }
