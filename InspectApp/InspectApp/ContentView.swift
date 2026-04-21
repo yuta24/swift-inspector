@@ -38,6 +38,10 @@ struct ContentView: View {
                 .keyboardShortcut("r", modifiers: .command)
             }
             ToolbarItem(placement: .primaryAction) {
+                LiveToolbarControl()
+                    .environmentObject(model)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showInspector.toggle()
                 } label: {
@@ -48,6 +52,49 @@ struct ContentView: View {
     }
 }
 
+
+// MARK: - Live Toolbar Control
+
+/// Live mode toolbar button with a dropdown for picking the refresh interval.
+/// Click toggles Live on/off (Cmd+L); the chevron opens the interval menu.
+private struct LiveToolbarControl: View {
+    @EnvironmentObject var model: InspectAppModel
+
+    private static let intervalPresets: [TimeInterval] = [0.5, 1.0, 2.0, 3.0]
+
+    var body: some View {
+        Menu {
+            Section("Interval") {
+                ForEach(Self.intervalPresets, id: \.self) { interval in
+                    Button {
+                        model.setLiveInterval(interval)
+                    } label: {
+                        HStack {
+                            Text("\(String(format: "%.1f", interval))s")
+                            if model.liveInterval == interval {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(
+                model.isLiveMode ? "Pause Live" : "Live",
+                systemImage: model.isLiveMode ? "pause.circle.fill" : "play.circle"
+            )
+        } primaryAction: {
+            model.toggleLiveMode()
+        }
+        .disabled(!model.isConnected)
+        .keyboardShortcut("l", modifiers: .command)
+        .help(
+            model.isLiveMode
+                ? "Auto-refreshing every \(String(format: "%.1f", model.liveInterval))s — click to pause"
+                : "Start auto-refreshing the hierarchy"
+        )
+    }
+}
 
 // MARK: - Detail Content
 

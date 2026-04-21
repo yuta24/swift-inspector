@@ -177,6 +177,67 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         )
     }
 
+    /// Returns a copy with the given image payloads replacing the existing
+    /// `screenshot` / `soloScreenshot`. Used by live mode to carry forward
+    /// images from the last full capture into a screenshot-less lite update.
+    public func replacingImages(screenshot: Data?, soloScreenshot: Data?) -> ViewNode {
+        ViewNode(
+            ident: ident,
+            className: className,
+            frame: frame,
+            windowFrame: windowFrame,
+            boundsOrigin: boundsOrigin,
+            boundsSize: boundsSize,
+            cornersInWindow: cornersInWindow,
+            isHidden: isHidden,
+            alpha: alpha,
+            backgroundColor: backgroundColor,
+            accessibilityIdentifier: accessibilityIdentifier,
+            accessibilityLabel: accessibilityLabel,
+            clipsToBounds: clipsToBounds,
+            cornerRadius: cornerRadius,
+            borderWidth: borderWidth,
+            borderColor: borderColor,
+            contentMode: contentMode,
+            isUserInteractionEnabled: isUserInteractionEnabled,
+            isEnabled: isEnabled,
+            properties: properties,
+            constraints: constraints,
+            screenshot: screenshot,
+            soloScreenshot: soloScreenshot,
+            children: children
+        )
+    }
+
+    public func replacingChildren(_ children: [ViewNode]) -> ViewNode {
+        ViewNode(
+            ident: ident,
+            className: className,
+            frame: frame,
+            windowFrame: windowFrame,
+            boundsOrigin: boundsOrigin,
+            boundsSize: boundsSize,
+            cornersInWindow: cornersInWindow,
+            isHidden: isHidden,
+            alpha: alpha,
+            backgroundColor: backgroundColor,
+            accessibilityIdentifier: accessibilityIdentifier,
+            accessibilityLabel: accessibilityLabel,
+            clipsToBounds: clipsToBounds,
+            cornerRadius: cornerRadius,
+            borderWidth: borderWidth,
+            borderColor: borderColor,
+            contentMode: contentMode,
+            isUserInteractionEnabled: isUserInteractionEnabled,
+            isEnabled: isEnabled,
+            properties: properties,
+            constraints: constraints,
+            screenshot: screenshot,
+            soloScreenshot: soloScreenshot,
+            children: children
+        )
+    }
+
     private static func sanitize(_ value: Double) -> Double {
         value.isFinite ? value : 0
     }

@@ -141,10 +141,18 @@ public final class InspectListener {
         case .requestHierarchy:
             logger.info("Received requestHierarchy, capturing roots…")
             Task { @MainActor in
-                let roots = Self.captureRoots()
+                let roots = Self.captureRoots(captureScreenshots: true)
                 logger.info("Captured \(roots.count) root(s), encoding…")
                 let nodeCount = Self.countNodes(in: roots)
                 logger.info("Total node count: \(nodeCount)")
+                self.send(.hierarchy(roots: roots), on: connection)
+            }
+        case .requestHierarchyLite:
+            logger.info("Received requestHierarchyLite, capturing roots without screenshots…")
+            Task { @MainActor in
+                let roots = Self.captureRoots(captureScreenshots: false)
+                let nodeCount = Self.countNodes(in: roots)
+                logger.info("Lite capture: \(roots.count) root(s), \(nodeCount) node(s)")
                 self.send(.hierarchy(roots: roots), on: connection)
             }
         case .highlightView(let ident):
@@ -229,9 +237,9 @@ public final class InspectListener {
     }
 
     @MainActor
-    private static func captureRoots() -> [ViewNode] {
+    private static func captureRoots(captureScreenshots: Bool) -> [ViewNode] {
         #if canImport(UIKit)
-        return HierarchyScanner.captureAllWindows()
+        return HierarchyScanner.captureAllWindows(captureScreenshots: captureScreenshots)
         #else
         return []
         #endif
