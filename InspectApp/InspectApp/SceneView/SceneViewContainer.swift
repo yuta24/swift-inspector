@@ -51,7 +51,9 @@ private struct NodeEntry {
     let snapshotNode: SCNNode
     let depth: Int
     let traversalIndex: Int
+    /// Plane width in SceneKit space, matches `view.bounds.size.width`.
     let width: CGFloat
+    /// Plane height in SceneKit space, matches `view.bounds.size.height`.
     let height: CGFloat
 }
 
@@ -148,19 +150,25 @@ private struct SceneKitView: NSViewRepresentable {
 
         coord.nodeMap.removeAll()
 
-        guard let firstRoot = roots.first else {
+        guard !roots.isEmpty else {
             scnView.scene = scene
             return
         }
 
-        let rootHeight = firstRoot.frame.size.height
+        // Y-flip reference and culling area both come from the union of all
+        // root window frames. Using only the first root's height breaks when
+        // multiple windows (keyboard, alert) have different heights.
+        let screenArea = roots.map(\.windowFrame).reduce(CGRect.null) { $0.union($1) }
+        let rootHeight = screenArea.height
 
         var traversalIndex = 0
         for root in roots {
             buildNodes(
                 node: root,
-                parentAbsOrigin: .zero,
+                parentAbsoluteOrigin: nil,
+                parentBoundsOrigin: .zero,
                 rootHeight: rootHeight,
+                screenArea: screenArea,
                 depth: 0,
                 traversalIndex: &traversalIndex,
                 sceneRoot: rootNode,
@@ -172,36 +180,71 @@ private struct SceneKitView: NSViewRepresentable {
         scnView.allowsCameraControl = true
     }
 
-    /// Recursively build SCNNodes for the view hierarchy.
-    /// Uses InAppViewDebugger-style coordinate conversion:
-    ///   sceneX = absUIKitX + width/2
-    ///   sceneY = rootHeight - absUIKitY - height/2
+    /// Recursively build SCNNodes. Absolute origin in root (window) space is
+    /// computed LookIn-style:
+    ///   abs.x = frame.origin.x - parent.bounds.origin.x + parent.abs.x
+    ///   abs.y = frame.origin.y - parent.bounds.origin.y + parent.abs.y
+    ///
+    /// This makes scroll offsets (= parent `bounds.origin`) explicit at every
+    /// step and avoids relying on a server-side AABB that can drift when a
+    /// view has a non-identity transform.
+    ///
+    /// Plane size uses `frame.size` — for a view with a non-identity
+    /// transform UIKit returns the AABB here, which matches what the user
+    /// sees on device. The solo screenshot (rendered at `bounds.size`) will
+    /// be stretched to fill the AABB; we accept the texture distortion
+    /// because matching the visible footprint is more important for a
+    /// 3D inspector than pixel-accurate content. `boundsSize` is kept in
+    /// the wire format for a future matrix-based renderer.
     private func buildNodes(
         node: ViewNode,
-        parentAbsOrigin: CGPoint,
+        parentAbsoluteOrigin: CGPoint?,
+        parentBoundsOrigin: CGPoint,
         rootHeight: CGFloat,
+        screenArea: CGRect,
         depth: Int,
         traversalIndex: inout Int,
         sceneRoot: SCNNode,
         coord: Coordinator
     ) {
+        // On-device visual footprint. For identity transforms this equals
+        // `bounds.size`; for transformed views it is the AABB.
         let w = node.frame.size.width
         let h = node.frame.size.height
         guard w >= 1, h >= 1 else { return }
         guard !node.isHidden else { return }
+        // Skip fully transparent container-like views; leaves may still carry
+        // a meaningful screenshot even at alpha 0 when driven by animations.
+        if node.alpha <= 0.001, !node.children.isEmpty { return }
+
+        // Absolute origin in the root (window) coordinate system.
+        let absoluteOrigin: CGPoint = {
+            guard let parent = parentAbsoluteOrigin else {
+                return node.frame.origin
+            }
+            return CGPoint(
+                x: node.frame.origin.x - parentBoundsOrigin.x + parent.x,
+                y: node.frame.origin.y - parentBoundsOrigin.y + parent.y
+            )
+        }()
+        let absoluteFrame = CGRect(origin: absoluteOrigin, size: CGSize(width: w, height: h))
+
+        // Culling: skip views fully outside the visible area. A generous
+        // margin keeps popovers and safe-area overflow in the scene. Use the
+        // server's `windowFrame` when available — it is the authoritative
+        // AABB including transforms.
+        let cullReference = node.windowFrame == .zero ? absoluteFrame : node.windowFrame
+        let margin: CGFloat = 50
+        let expanded = screenArea.insetBy(dx: -margin, dy: -margin)
+        if !expanded.intersects(cullReference) { return }
 
         let myIndex = traversalIndex
         traversalIndex += 1
 
-        // Absolute position in UIKit coordinates
-        let absX = parentAbsOrigin.x + node.frame.origin.x
-        let absY = parentAbsOrigin.y + node.frame.origin.y
-
-        // Convert to SceneKit: center of view, Y flipped relative to root height.
-        // Add a tiny per-node Z offset (myIndex * epsilon) to break z-fighting
-        // when siblings or overlapping CALayers sit at the same depth.
-        let sceneX = Float(absX + w / 2)
-        let sceneY = Float(rootHeight - absY - h / 2)
+        // SceneKit position: center of the plane, Y flipped against rootHeight.
+        // A tiny per-node Z offset breaks z-fighting when layerSpacing=0.
+        let sceneX = Float(absoluteOrigin.x + w / 2)
+        let sceneY = Float(rootHeight - (absoluteOrigin.y + h / 2))
         let sceneZ = layerSpacing * Float(depth) + Float(myIndex) * 0.01
 
         let isSelected = node.id == selectedNodeID
@@ -272,13 +315,16 @@ private struct SceneKitView: NSViewRepresentable {
             height: h
         )
 
-        // Recurse children
-        let childAbsOrigin = CGPoint(x: absX, y: absY)
+        // Recurse children. Pass this node's absolute origin and bounds
+        // origin so children can compute their own absolute positions.
+        let parentBounds = node.boundsOrigin
         for child in node.children {
             buildNodes(
                 node: child,
-                parentAbsOrigin: childAbsOrigin,
+                parentAbsoluteOrigin: absoluteOrigin,
+                parentBoundsOrigin: parentBounds,
                 rootHeight: rootHeight,
+                screenArea: screenArea,
                 depth: depth + 1,
                 traversalIndex: &traversalIndex,
                 sceneRoot: sceneRoot,

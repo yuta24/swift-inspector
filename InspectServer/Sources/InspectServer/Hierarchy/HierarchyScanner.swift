@@ -98,10 +98,28 @@ public enum HierarchyScanner {
         let nodeIdent = UUID()
         ViewIdentRegistry.shared.register(view: view, ident: nodeIdent)
 
+        // Absolute AABB in window coordinates — used for culling and as a
+        // fallback for clients that don't do the recursive origin walk.
+        let windowFrame = view.convert(view.bounds, to: window)
+
+        // Four corners of bounds in window space — preserves enough 2D
+        // affine information for a future renderer to rotate/skew planes.
+        let b = view.bounds
+        let cornersInWindow: [CGPoint] = [
+            view.convert(CGPoint(x: b.minX, y: b.minY), to: window),
+            view.convert(CGPoint(x: b.maxX, y: b.minY), to: window),
+            view.convert(CGPoint(x: b.minX, y: b.maxY), to: window),
+            view.convert(CGPoint(x: b.maxX, y: b.maxY), to: window),
+        ]
+
         return ViewNode(
             ident: nodeIdent,
             className: String(describing: type(of: view)),
             frame: view.frame,
+            windowFrame: windowFrame,
+            boundsOrigin: view.bounds.origin,
+            boundsSize: view.bounds.size,
+            cornersInWindow: cornersInWindow,
             isHidden: view.isHidden,
             alpha: Double(view.alpha),
             backgroundColor: view.backgroundColor.flatMap(RGBAColor.init(uiColor:)),
@@ -169,10 +187,25 @@ public enum HierarchyScanner {
 
         let nodeIdent = UUID()
 
+        // Absolute AABB in window coordinates (for culling / fallback).
+        let windowFrame = layer.convert(layer.bounds, to: window.layer)
+
+        let b = layer.bounds
+        let cornersInWindow: [CGPoint] = [
+            layer.convert(CGPoint(x: b.minX, y: b.minY), to: window.layer),
+            layer.convert(CGPoint(x: b.maxX, y: b.minY), to: window.layer),
+            layer.convert(CGPoint(x: b.minX, y: b.maxY), to: window.layer),
+            layer.convert(CGPoint(x: b.maxX, y: b.maxY), to: window.layer),
+        ]
+
         return ViewNode(
             ident: nodeIdent,
             className: String(describing: type(of: layer)),
             frame: layer.frame,
+            windowFrame: windowFrame,
+            boundsOrigin: layer.bounds.origin,
+            boundsSize: layer.bounds.size,
+            cornersInWindow: cornersInWindow,
             isHidden: layer.isHidden,
             alpha: Double(layer.opacity),
             backgroundColor: backgroundColor,

@@ -70,6 +70,59 @@ final class ViewNodeTests: XCTestCase {
         XCTAssertEqual(color.alpha, 0.5)
     }
 
+    func testGeometryExtrasSanitization() {
+        let node = ViewNode(
+            className: "UIView",
+            frame: CGRect(x: 0, y: 0, width: 10, height: 10),
+            boundsSize: CGSize(width: Double.nan, height: -Double.infinity),
+            cornersInWindow: [
+                CGPoint(x: Double.nan, y: 0),
+                CGPoint(x: 100, y: Double.infinity),
+                CGPoint(x: 0, y: 100),
+                CGPoint(x: 100, y: 100),
+            ]
+        )
+        XCTAssertEqual(node.boundsSize?.width, 0)
+        XCTAssertEqual(node.boundsSize?.height, 0)
+        let corners = node.cornersInWindow!
+        XCTAssertEqual(corners.count, 4)
+        XCTAssertEqual(corners[0], CGPoint(x: 0, y: 0))
+        XCTAssertEqual(corners[1], CGPoint(x: 100, y: 0))
+        XCTAssertEqual(corners[2], CGPoint(x: 0, y: 100))
+        XCTAssertEqual(corners[3], CGPoint(x: 100, y: 100))
+    }
+
+    func testLegacyDecodeWithoutGeometryExtras() throws {
+        // Simulates an older server that doesn't send `boundsSize` or
+        // `cornersInWindow`. We encode a full ViewNode, strip the new keys,
+        // and decode again. Missing fields must decode to nil without
+        // failing.
+        let node = ViewNode(
+            className: "UILabel",
+            frame: CGRect(x: 0, y: 0, width: 100, height: 20),
+            boundsSize: CGSize(width: 100, height: 20),
+            cornersInWindow: [
+                CGPoint(x: 0, y: 0),
+                CGPoint(x: 100, y: 0),
+                CGPoint(x: 0, y: 20),
+                CGPoint(x: 100, y: 20),
+            ]
+        )
+        let encoder = JSONEncoder()
+        let full = try encoder.encode(node)
+        var json = try JSONSerialization.jsonObject(with: full) as! [String: Any]
+        json.removeValue(forKey: "boundsSize")
+        json.removeValue(forKey: "cornersInWindow")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(ViewNode.self, from: stripped)
+        XCTAssertEqual(decoded.className, "UILabel")
+        XCTAssertNil(decoded.boundsSize)
+        XCTAssertNil(decoded.cornersInWindow)
+        XCTAssertEqual(decoded.frame.size.width, 100)
+    }
+
     func testFramingRoundtrip() {
         let payload = Data("hello".utf8)
         let framed = Framing.frame(payload)
