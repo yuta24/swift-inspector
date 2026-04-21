@@ -4,23 +4,20 @@ import InspectCore
 struct ContentView: View {
     @EnvironmentObject var model: InspectAppModel
     @State private var showInspector = true
-    @State private var contentMode: ContentMode = .screenshot
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300)
         } detail: {
-            MainContentView(
-                node: model.selectedNode,
+            DetailContentView(
                 roots: model.roots,
-                contentMode: $contentMode,
                 selectedNodeID: $model.selectedNodeID
             )
         }
         .inspector(isPresented: $showInspector) {
             InspectorView(node: model.selectedNode)
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 400)
+                .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -33,15 +30,6 @@ struct ContentView: View {
                 .keyboardShortcut("r", modifiers: .command)
             }
             ToolbarItem(placement: .primaryAction) {
-                Picker("View", selection: $contentMode) {
-                    ForEach(ContentMode.allCases) { mode in
-                        Label(mode.title, systemImage: mode.icon)
-                            .tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            ToolbarItem(placement: .primaryAction) {
                 Button {
                     showInspector.toggle()
                 } label: {
@@ -52,25 +40,27 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Content Mode
 
-enum ContentMode: String, CaseIterable, Identifiable {
-    case screenshot
-    case threeD
+// MARK: - Detail Content
 
-    var id: String { rawValue }
+private struct DetailContentView: View {
+    let roots: [ViewNode]
+    @Binding var selectedNodeID: UUID?
 
-    var title: String {
-        switch self {
-        case .screenshot: return "Screenshot"
-        case .threeD: return "3D"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .screenshot: return "camera.viewfinder"
-        case .threeD: return "cube"
+    var body: some View {
+        ZStack {
+            if roots.isEmpty {
+                PlaceholderView(
+                    title: "No Hierarchy",
+                    systemImage: "cube.transparent",
+                    message: "Connect to a device and capture a snapshot."
+                )
+            } else {
+                SceneViewContainer(
+                    roots: roots,
+                    selectedNodeID: $selectedNodeID
+                )
+            }
         }
     }
 }
@@ -151,61 +141,6 @@ private struct DevicePickerBar: View {
     }
 }
 
-// MARK: - Main Content
-
-private struct MainContentView: View {
-    let node: ViewNode?
-    let roots: [ViewNode]
-    @Binding var contentMode: ContentMode
-    @Binding var selectedNodeID: UUID?
-
-    var body: some View {
-        switch contentMode {
-        case .screenshot:
-            ScreenshotContentView(node: node)
-        case .threeD:
-            if roots.isEmpty {
-                PlaceholderView(
-                    title: "No Hierarchy",
-                    systemImage: "cube.transparent",
-                    message: "Connect to a device and capture a snapshot."
-                )
-            } else {
-                SceneViewContainer(
-                    roots: roots,
-                    selectedNodeID: $selectedNodeID
-                )
-            }
-        }
-    }
-}
-
-private struct ScreenshotContentView: View {
-    let node: ViewNode?
-
-    var body: some View {
-        if let node, let screenshot = node.screenshot, let image = NSImage(data: screenshot) {
-            ScrollView([.horizontal, .vertical]) {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxHeight: 600)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-                    .padding(32)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .background(.background.secondary)
-        } else {
-            PlaceholderView(
-                title: "No Screenshot",
-                systemImage: "camera.viewfinder",
-                message: "Select a node with a screenshot to preview it here."
-            )
-        }
-    }
-}
 
 // MARK: - Inspector
 
@@ -226,6 +161,7 @@ private struct InspectorView: View {
                             .textSelection(.enabled)
                     }
 
+                    ScreenshotSection(node: node)
                     FrameSection(frame: node.frame)
                     AppearanceSection(node: node)
                     LayerSection(node: node)
@@ -243,6 +179,50 @@ private struct InspectorView: View {
                 systemImage: "sidebar.squares.right",
                 message: "Select a node to inspect its attributes."
             )
+        }
+    }
+}
+
+// MARK: - Screenshot Section
+
+private struct ScreenshotSection: View {
+    let node: ViewNode
+    @State private var showSolo = false
+
+    var body: some View {
+        let data = showSolo ? node.soloScreenshot : node.screenshot
+        if data != nil || node.soloScreenshot != nil {
+            GroupBox {
+                VStack(spacing: 8) {
+                    if let data, let image = NSImage(data: data) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                    } else {
+                        Text("No image")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(height: 60)
+                    }
+
+                    if node.soloScreenshot != nil && node.screenshot != nil {
+                        Picker("", selection: $showSolo) {
+                            Text("Group").tag(false)
+                            Text("Solo").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(4)
+            } label: {
+                SectionHeader("Screenshot", icon: "camera.viewfinder")
+            }
         }
     }
 }

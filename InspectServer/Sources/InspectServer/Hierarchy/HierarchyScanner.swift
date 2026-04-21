@@ -57,13 +57,30 @@ public enum HierarchyScanner {
             soloScreenshot = nil
         }
 
-        let children = view.subviews.map {
+        // Collect backing layers of subviews so we can skip them when scanning sublayers
+        let subviewLayerIdentifiers = Set(view.subviews.map { ObjectIdentifier($0.layer) })
+
+        // UIView children
+        var children = view.subviews.map {
             buildNode(
                 from: $0,
                 window: window,
                 windowCapture: windowCapture,
                 captureScreenshots: captureScreenshots
             )
+        }
+
+        // CALayer children (sublayers not backed by any subview)
+        for sublayer in view.layer.sublayers ?? [] {
+            if subviewLayerIdentifiers.contains(ObjectIdentifier(sublayer)) {
+                continue
+            }
+            children.append(buildNode(
+                fromLayer: sublayer,
+                window: window,
+                windowCapture: windowCapture,
+                captureScreenshots: captureScreenshots
+            ))
         }
 
         let accID = view.accessibilityIdentifier?.isEmpty == false ? view.accessibilityIdentifier : nil
@@ -103,6 +120,118 @@ public enum HierarchyScanner {
             children: children
         )
     }
+    // MARK: - CALayer node building
+
+    static func buildNode(
+        fromLayer layer: CALayer,
+        window: UIWindow,
+        windowCapture: (CGImage, CGFloat)?,
+        captureScreenshots: Bool
+    ) -> ViewNode {
+        let groupScreenshot: Data?
+        let soloScreenshot: Data?
+
+        if captureScreenshots {
+            if let (windowImage, scale) = windowCapture {
+                groupScreenshot = ScreenshotCapture.cropLayer(
+                    from: windowImage,
+                    scale: scale,
+                    layer: layer,
+                    window: window
+                )
+            } else {
+                groupScreenshot = nil
+            }
+            soloScreenshot = ScreenshotCapture.soloScreenshotOfLayer(layer)
+        } else {
+            groupScreenshot = nil
+            soloScreenshot = nil
+        }
+
+        // Recurse into sublayers
+        let children = (layer.sublayers ?? []).map {
+            buildNode(
+                fromLayer: $0,
+                window: window,
+                windowCapture: windowCapture,
+                captureScreenshots: captureScreenshots
+            )
+        }
+
+        let backgroundColor = layer.backgroundColor
+            .flatMap { UIColor(cgColor: $0) }
+            .flatMap(RGBAColor.init(uiColor:))
+        let borderColor = layer.borderColor
+            .flatMap { UIColor(cgColor: $0) }
+            .flatMap(RGBAColor.init(uiColor:))
+
+        let properties = Self.extractLayerProperties(from: layer)
+
+        let nodeIdent = UUID()
+
+        return ViewNode(
+            ident: nodeIdent,
+            className: String(describing: type(of: layer)),
+            frame: layer.frame,
+            isHidden: layer.isHidden,
+            alpha: Double(layer.opacity),
+            backgroundColor: backgroundColor,
+            accessibilityIdentifier: nil,
+            accessibilityLabel: nil,
+            clipsToBounds: layer.masksToBounds,
+            cornerRadius: Double(layer.cornerRadius),
+            borderWidth: Double(layer.borderWidth),
+            borderColor: borderColor,
+            contentMode: nil,
+            isUserInteractionEnabled: false,
+            isEnabled: nil,
+            properties: properties,
+            screenshot: groupScreenshot,
+            soloScreenshot: soloScreenshot,
+            children: children
+        )
+    }
+
+    private static func extractLayerProperties(from layer: CALayer) -> [String: String] {
+        var props: [String: String] = [:]
+        props["_kind"] = "CALayer"
+
+        if let textLayer = layer as? CATextLayer {
+            if let str = textLayer.string as? String {
+                props["text"] = str
+            } else if let attr = textLayer.string as? NSAttributedString {
+                props["text"] = attr.string
+            }
+            props["fontSize"] = String(format: "%g", textLayer.fontSize)
+            if let fg = textLayer.foregroundColor {
+                props["foregroundColor"] = describeColor(UIColor(cgColor: fg))
+            }
+        }
+
+        if let shapeLayer = layer as? CAShapeLayer {
+            if let fillColor = shapeLayer.fillColor {
+                props["fillColor"] = describeColor(UIColor(cgColor: fillColor))
+            }
+            if let strokeColor = shapeLayer.strokeColor {
+                props["strokeColor"] = describeColor(UIColor(cgColor: strokeColor))
+            }
+            props["lineWidth"] = String(format: "%g", shapeLayer.lineWidth)
+        }
+
+        if let gradientLayer = layer as? CAGradientLayer {
+            props["type"] = gradientLayer.type.rawValue
+            if let colors = gradientLayer.colors as? [CGColor] {
+                props["colorCount"] = "\(colors.count)"
+            }
+        }
+
+        if layer.contents != nil {
+            props["hasContents"] = "true"
+        }
+
+        return props
+    }
+
     // MARK: - Type-specific property extraction
 
     private static func extractProperties(from view: UIView) -> [String: String] {
