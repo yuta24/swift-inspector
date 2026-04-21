@@ -307,13 +307,14 @@ final class InspectAppModel: ObservableObject {
         return findNode(byPath: path, in: newRoots)?.id
     }
 
-    /// A stable fingerprint of a node's location in the tree, independent of
-    /// the (per-capture) UUID. Prefers `accessibilityIdentifier` when present
-    /// so identifiers survive sibling reordering; falls back to className +
-    /// sibling index.
+    /// Walks the tree to find the stable path (list of sibling-index or
+    /// accessibility-identifier segments) that uniquely locates a node with
+    /// the given `ident`. Uses `ViewNode.stablePathSegment` for per-node
+    /// segments so SceneKit diffing and selection preservation agree on the
+    /// same identity scheme.
     static func stablePath(for id: UUID, in roots: [ViewNode]) -> [String]? {
         for (index, root) in roots.enumerated() {
-            if let path = path(to: id, in: root, prefix: [segment(for: root, siblingIndex: index)]) {
+            if let path = path(to: id, in: root, prefix: [root.stablePathSegment(siblingIndex: index)]) {
                 return path
             }
         }
@@ -327,17 +328,10 @@ final class InspectAppModel: ObservableObject {
     ) -> [String]? {
         if node.id == id { return prefix }
         for (index, child) in node.children.enumerated() {
-            let next = prefix + [segment(for: child, siblingIndex: index)]
+            let next = prefix + [child.stablePathSegment(siblingIndex: index)]
             if let found = path(to: id, in: child, prefix: next) { return found }
         }
         return nil
-    }
-
-    private static func segment(for node: ViewNode, siblingIndex: Int) -> String {
-        if let ident = node.accessibilityIdentifier, !ident.isEmpty {
-            return "#\(ident)"
-        }
-        return "\(node.className)[\(siblingIndex)]"
     }
 
     // MARK: Screenshot carry-over
@@ -354,7 +348,7 @@ final class InspectAppModel: ObservableObject {
         return newRoots.enumerated().map { index, root in
             rebuild(
                 node: root,
-                path: [segment(for: root, siblingIndex: index)],
+                path: [root.stablePathSegment(siblingIndex: index)],
                 cache: cache
             )
         }
@@ -366,7 +360,7 @@ final class InspectAppModel: ObservableObject {
         into cache: inout [String: (Data?, Data?)]
     ) {
         for (index, node) in nodes.enumerated() {
-            let path = prefix + [segment(for: node, siblingIndex: index)]
+            let path = prefix + [node.stablePathSegment(siblingIndex: index)]
             if node.screenshot != nil || node.soloScreenshot != nil {
                 cache[path.joined(separator: "/")] = (node.screenshot, node.soloScreenshot)
             }
@@ -382,7 +376,7 @@ final class InspectAppModel: ObservableObject {
         let rebuiltChildren = node.children.enumerated().map { index, child in
             rebuild(
                 node: child,
-                path: path + [segment(for: child, siblingIndex: index)],
+                path: path + [child.stablePathSegment(siblingIndex: index)],
                 cache: cache
             )
         }
@@ -401,7 +395,7 @@ final class InspectAppModel: ObservableObject {
     static func findNode(byPath path: [String], in roots: [ViewNode]) -> ViewNode? {
         guard let first = path.first else { return nil }
         for (index, root) in roots.enumerated() {
-            if segment(for: root, siblingIndex: index) == first {
+            if root.stablePathSegment(siblingIndex: index) == first {
                 return resolve(path: Array(path.dropFirst()), in: root)
             }
         }
@@ -411,7 +405,7 @@ final class InspectAppModel: ObservableObject {
     private static func resolve(path: [String], in node: ViewNode) -> ViewNode? {
         guard let first = path.first else { return node }
         for (index, child) in node.children.enumerated() {
-            if segment(for: child, siblingIndex: index) == first {
+            if child.stablePathSegment(siblingIndex: index) == first {
                 return resolve(path: Array(path.dropFirst()), in: child)
             }
         }

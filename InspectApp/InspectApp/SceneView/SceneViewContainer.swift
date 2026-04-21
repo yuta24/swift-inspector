@@ -64,6 +64,29 @@ private struct NodeEntry {
     /// Hyperion-style overlay can reason about edges without re-walking the
     /// hierarchy.
     let windowOrigin: CGPoint
+    /// Stable path across captures — used as the diff key so containers
+    /// survive the fresh-UUID refresh that `HierarchyScanner` performs on
+    /// every scan.
+    let path: String
+    /// Byte count of the screenshot payload currently uploaded to the
+    /// plane's material. Cheap heuristic for detecting texture changes
+    /// across captures without hashing the full image data. A lite-capture
+    /// tick reuses carried-forward screenshots, so counts stay equal and
+    /// we can skip the material rebuild.
+    let textureCount: Int
+}
+
+/// Per-node build plan computed during the pre-order walk. Separates the
+/// "what to build/update" decision from the "how to realize it in SceneKit"
+/// step so the same plan can drive either path.
+private struct BuildInfo {
+    let node: ViewNode
+    let path: String
+    let depth: Int
+    let traversalIndex: Int
+    let absoluteOrigin: CGPoint
+    let size: CGSize
+    let isSelected: Bool
 }
 
 // MARK: - NSViewRepresentable
@@ -113,9 +136,11 @@ private struct SceneKitView: NSViewRepresentable {
         let rootsHash = roots.hashValue
         let compareID = measurementHoverID ?? measurementReferenceID
 
-        // Full rebuild only when hierarchy data changes
+        // Incremental update when hierarchy data changes. Existing SCNNodes
+        // survive across live ticks (matched by stable path), so the scene
+        // doesn't flash between captures.
         if coord.lastRootsHash != rootsHash {
-            rebuildScene(scnView: scnView, coord: coord)
+            applySceneDelta(scnView: scnView, coord: coord)
             coord.lastRootsHash = rootsHash
             coord.lastLayerSpacing = layerSpacing
             coord.lastShowLabels = showLabels
@@ -204,75 +229,114 @@ private struct SceneKitView: NSViewRepresentable {
         coord.measurementNode = overlay
     }
 
-    // MARK: - Full scene rebuild
+    // MARK: - Scene delta (incremental update)
 
-    private func rebuildScene(scnView: SCNView, coord: Coordinator) {
-        let scene = SCNScene()
-        scene.background.contents = NSColor.windowBackgroundColor
-        let rootNode = scene.rootNode
-
-        coord.nodeMap.removeAll()
+    /// Applies the new `roots` to the live scene without tearing it down.
+    /// Containers persist across ticks via `coord.pathMap` keyed by stable
+    /// path, so live mode updates touch only position / geometry / material
+    /// — no SCNScene replacement, no GPU texture re-upload for nodes whose
+    /// screenshot payload is unchanged.
+    private func applySceneDelta(scnView: SCNView, coord: Coordinator) {
+        // Ensure a scene exists. Only created once; subsequent ticks reuse it.
+        let scene: SCNScene
+        if let existing = scnView.scene {
+            scene = existing
+        } else {
+            scene = SCNScene()
+            scene.background.contents = NSColor.windowBackgroundColor
+            scnView.scene = scene
+        }
+        let sceneRoot = scene.rootNode
 
         guard !roots.isEmpty else {
-            scnView.scene = scene
+            for entry in coord.pathMap.values {
+                entry.snapshotNode.removeFromParentNode()
+            }
+            coord.pathMap.removeAll()
+            coord.nodeMap.removeAll()
+            coord.measurementNode?.removeFromParentNode()
+            coord.measurementNode = nil
             coord.rootHeight = 0
             coord.screenArea = .zero
             return
         }
 
-        // Y-flip reference and culling area both come from the union of all
-        // root window frames. Using only the first root's height breaks when
-        // multiple windows (keyboard, alert) have different heights.
+        // Y-flip reference and culling area come from the union of all root
+        // window frames. Using only the first root's height breaks when
+        // multiple windows (keyboard, alert) differ in height.
         let screenArea = roots.map(\.windowFrame).reduce(CGRect.null) { $0.union($1) }
         let rootHeight = screenArea.height
         coord.rootHeight = rootHeight
         coord.screenArea = screenArea
 
+        let infos = enumerateBuildInfos(roots: roots, screenArea: screenArea)
+        let newPaths = Set(infos.map(\.path))
+
+        // Remove containers for paths that are no longer part of the tree.
+        for (path, entry) in coord.pathMap where !newPaths.contains(path) {
+            entry.snapshotNode.removeFromParentNode()
+            coord.pathMap.removeValue(forKey: path)
+        }
+
+        var newNodeMap: [UUID: NodeEntry] = [:]
+        var newPathMap: [String: NodeEntry] = [:]
+
+        for info in infos {
+            let entry: NodeEntry
+            if let existing = coord.pathMap[info.path] {
+                entry = updateContainer(existing: existing, info: info, rootHeight: rootHeight)
+            } else {
+                entry = constructContainer(info: info, rootHeight: rootHeight)
+                sceneRoot.addChildNode(entry.snapshotNode)
+            }
+            newPathMap[info.path] = entry
+            newNodeMap[info.node.id] = entry
+        }
+
+        coord.pathMap = newPathMap
+        coord.nodeMap = newNodeMap
+    }
+
+    // MARK: - Tree walk
+
+    /// Pre-order walk that mirrors `HierarchyScanner`'s own traversal order:
+    /// emits a `BuildInfo` per renderable node, skipping hidden, zero-size,
+    /// or off-screen entries. Called unconditionally every tick — the diff
+    /// step below decides whether to construct or update based on `path`.
+    ///
+    /// Absolute origin in root (window) space is computed LookIn-style:
+    ///   abs.x = frame.origin.x - parent.bounds.origin.x + parent.abs.x
+    ///   abs.y = frame.origin.y - parent.bounds.origin.y + parent.abs.y
+    /// which keeps scroll offsets (= parent `bounds.origin`) explicit and
+    /// avoids relying on a server-side AABB that drifts under non-identity
+    /// transforms.
+    private func enumerateBuildInfos(roots: [ViewNode], screenArea: CGRect) -> [BuildInfo] {
+        var infos: [BuildInfo] = []
         var traversalIndex = 0
-        for root in roots {
-            buildNodes(
+        for (siblingIndex, root) in roots.enumerated() {
+            walkForBuildInfos(
                 node: root,
                 parentAbsoluteOrigin: nil,
                 parentBoundsOrigin: .zero,
-                rootHeight: rootHeight,
+                pathPrefix: root.stablePathSegment(siblingIndex: siblingIndex),
                 screenArea: screenArea,
                 depth: 0,
                 traversalIndex: &traversalIndex,
-                sceneRoot: rootNode,
-                coord: coord
+                infos: &infos
             )
         }
-
-        scnView.scene = scene
-        scnView.allowsCameraControl = true
+        return infos
     }
 
-    /// Recursively build SCNNodes. Absolute origin in root (window) space is
-    /// computed LookIn-style:
-    ///   abs.x = frame.origin.x - parent.bounds.origin.x + parent.abs.x
-    ///   abs.y = frame.origin.y - parent.bounds.origin.y + parent.abs.y
-    ///
-    /// This makes scroll offsets (= parent `bounds.origin`) explicit at every
-    /// step and avoids relying on a server-side AABB that can drift when a
-    /// view has a non-identity transform.
-    ///
-    /// Plane size uses `frame.size` — for a view with a non-identity
-    /// transform UIKit returns the AABB here, which matches what the user
-    /// sees on device. The solo screenshot (rendered at `bounds.size`) will
-    /// be stretched to fill the AABB; we accept the texture distortion
-    /// because matching the visible footprint is more important for a
-    /// 3D inspector than pixel-accurate content. `boundsSize` is kept in
-    /// the wire format for a future matrix-based renderer.
-    private func buildNodes(
+    private func walkForBuildInfos(
         node: ViewNode,
         parentAbsoluteOrigin: CGPoint?,
         parentBoundsOrigin: CGPoint,
-        rootHeight: CGFloat,
+        pathPrefix: String,
         screenArea: CGRect,
         depth: Int,
         traversalIndex: inout Int,
-        sceneRoot: SCNNode,
-        coord: Coordinator
+        infos: inout [BuildInfo]
     ) {
         let w = node.frame.size.width
         let h = node.frame.size.height
@@ -281,9 +345,7 @@ private struct SceneKitView: NSViewRepresentable {
         if node.alpha <= 0.001, !node.children.isEmpty { return }
 
         let absoluteOrigin: CGPoint = {
-            guard let parent = parentAbsoluteOrigin else {
-                return node.frame.origin
-            }
+            guard let parent = parentAbsoluteOrigin else { return node.frame.origin }
             return CGPoint(
                 x: node.frame.origin.x - parentBoundsOrigin.x + parent.x,
                 y: node.frame.origin.y - parentBoundsOrigin.y + parent.y
@@ -299,19 +361,160 @@ private struct SceneKitView: NSViewRepresentable {
         let myIndex = traversalIndex
         traversalIndex += 1
 
-        let sceneX = Float(absoluteOrigin.x + w / 2)
-        let sceneY = Float(rootHeight - (absoluteOrigin.y + h / 2))
-        let sceneZ = layerSpacing * Float(depth) + Float(myIndex) * 0.01
+        infos.append(BuildInfo(
+            node: node,
+            path: pathPrefix,
+            depth: depth,
+            traversalIndex: myIndex,
+            absoluteOrigin: absoluteOrigin,
+            size: CGSize(width: w, height: h),
+            isSelected: node.id == selectedNodeID
+        ))
 
-        let isSelected = node.id == selectedNodeID
+        let parentBounds = node.boundsOrigin
+        for (siblingIndex, child) in node.children.enumerated() {
+            walkForBuildInfos(
+                node: child,
+                parentAbsoluteOrigin: absoluteOrigin,
+                parentBoundsOrigin: parentBounds,
+                pathPrefix: pathPrefix + "/" + child.stablePathSegment(siblingIndex: siblingIndex),
+                screenArea: screenArea,
+                depth: depth + 1,
+                traversalIndex: &traversalIndex,
+                infos: &infos
+            )
+        }
+    }
 
-        let containerNode = SCNNode()
-        containerNode.name = node.id.uuidString
-        containerNode.position = SCNVector3(sceneX, sceneY, sceneZ)
-        containerNode.renderingOrder = myIndex
-        sceneRoot.addChildNode(containerNode)
+    // MARK: - Container construction
 
-        let plane = SCNPlane(width: w, height: h)
+    private func scenePosition(for info: BuildInfo, rootHeight: CGFloat) -> SCNVector3 {
+        let x = Float(info.absoluteOrigin.x + info.size.width / 2)
+        let y = Float(rootHeight - (info.absoluteOrigin.y + info.size.height / 2))
+        let z = layerSpacing * Float(info.depth) + Float(info.traversalIndex) * 0.01
+        return SCNVector3(x, y, z)
+    }
+
+    private func constructContainer(info: BuildInfo, rootHeight: CGFloat) -> NodeEntry {
+        let container = SCNNode()
+        container.name = info.node.id.uuidString
+        container.position = scenePosition(for: info, rootHeight: rootHeight)
+        container.renderingOrder = info.traversalIndex
+
+        let plane = SCNPlane(width: info.size.width, height: info.size.height)
+        plane.materials = [makeMaterial(for: info.node)]
+        let planeNode = SCNNode(geometry: plane)
+        planeNode.name = "_plane"
+        container.addChildNode(planeNode)
+
+        container.addChildNode(makeBorderGroup(
+            width: info.size.width,
+            height: info.size.height,
+            isSelected: info.isSelected
+        ))
+
+        if info.isSelected {
+            container.addChildNode(makeHighlight(width: info.size.width, height: info.size.height))
+        }
+
+        if info.size.width >= 20, info.size.height >= 10 {
+            let label = makeLabel(
+                info.node.className,
+                width: info.size.width,
+                height: info.size.height,
+                isSelected: info.isSelected
+            )
+            label.isHidden = !showLabels
+            container.addChildNode(label)
+        }
+
+        return NodeEntry(
+            snapshotNode: container,
+            depth: info.depth,
+            traversalIndex: info.traversalIndex,
+            width: info.size.width,
+            height: info.size.height,
+            windowOrigin: info.absoluteOrigin,
+            path: info.path,
+            textureCount: textureByteCount(for: info.node)
+        )
+    }
+
+    /// Apply `info` to an existing container. The goal is to avoid recreating
+    /// any SCNNode whose visual state hasn't changed — so position/name are
+    /// always refreshed (cheap), and size-sensitive children (plane / border
+    /// / highlight / label) only get rebuilt when the frame actually changed.
+    /// Materials are replaced only when the screenshot payload size differs,
+    /// which keeps lite-capture ticks from triggering GPU texture re-uploads.
+    private func updateContainer(existing: NodeEntry, info: BuildInfo, rootHeight: CGFloat) -> NodeEntry {
+        let container = existing.snapshotNode
+        container.name = info.node.id.uuidString
+        container.position = scenePosition(for: info, rootHeight: rootHeight)
+        container.renderingOrder = info.traversalIndex
+
+        let sizeChanged = info.size.width != existing.width || info.size.height != existing.height
+        let newTextureCount = textureByteCount(for: info.node)
+        let textureChanged = newTextureCount != existing.textureCount
+
+        if let planeNode = container.childNode(withName: "_plane", recursively: false),
+           let plane = planeNode.geometry as? SCNPlane {
+            if sizeChanged {
+                plane.width = info.size.width
+                plane.height = info.size.height
+            }
+            if textureChanged {
+                plane.materials = [makeMaterial(for: info.node)]
+            }
+        }
+
+        if sizeChanged {
+            // Border/label geometry is per-size; cheaper to rebuild than to
+            // re-derive every edge offset or label scale in place.
+            container.childNode(withName: "_border", recursively: false)?.removeFromParentNode()
+            container.addChildNode(makeBorderGroup(
+                width: info.size.width,
+                height: info.size.height,
+                isSelected: info.isSelected
+            ))
+
+            container.childNode(withName: "_label", recursively: false)?.removeFromParentNode()
+            if info.size.width >= 20, info.size.height >= 10 {
+                let label = makeLabel(
+                    info.node.className,
+                    width: info.size.width,
+                    height: info.size.height,
+                    isSelected: info.isSelected
+                )
+                label.isHidden = !showLabels
+                container.addChildNode(label)
+            }
+
+            if let highlight = container.childNode(withName: "_highlight", recursively: false),
+               let plane = highlight.geometry as? SCNPlane {
+                plane.width = info.size.width
+                plane.height = info.size.height
+            }
+        }
+
+        return NodeEntry(
+            snapshotNode: container,
+            depth: info.depth,
+            traversalIndex: info.traversalIndex,
+            width: info.size.width,
+            height: info.size.height,
+            windowOrigin: info.absoluteOrigin,
+            path: info.path,
+            textureCount: newTextureCount
+        )
+    }
+
+    private func textureByteCount(for node: ViewNode) -> Int {
+        node.soloScreenshot?.count ?? node.screenshot?.count ?? 0
+    }
+
+    // MARK: - Material / border / highlight / label factories
+
+    private func makeMaterial(for node: ViewNode) -> SCNMaterial {
         let material = SCNMaterial()
         material.isDoubleSided = true
         material.lightingModel = .constant
@@ -334,62 +537,20 @@ private struct SceneKitView: NSViewRepresentable {
         } else {
             material.diffuse.contents = NSColor(white: 1.0, alpha: 0.02)
         }
-
-        plane.materials = [material]
-        let planeNode = SCNNode(geometry: plane)
-        planeNode.name = "_plane"
-        containerNode.addChildNode(planeNode)
-
-        addBorder(to: containerNode, width: w, height: h, isSelected: isSelected)
-
-        if isSelected {
-            addHighlight(to: containerNode, width: w, height: h)
-        }
-
-        if w >= 20 && h >= 10 {
-            let labelNode = makeLabel(node.className, width: w, height: h, isSelected: isSelected)
-            labelNode.isHidden = !showLabels
-            containerNode.addChildNode(labelNode)
-        }
-
-        coord.nodeMap[node.id] = NodeEntry(
-            snapshotNode: containerNode,
-            depth: depth,
-            traversalIndex: myIndex,
-            width: w,
-            height: h,
-            windowOrigin: absoluteOrigin
-        )
-
-        let parentBounds = node.boundsOrigin
-        for child in node.children {
-            buildNodes(
-                node: child,
-                parentAbsoluteOrigin: absoluteOrigin,
-                parentBoundsOrigin: parentBounds,
-                rootHeight: rootHeight,
-                screenArea: screenArea,
-                depth: depth + 1,
-                traversalIndex: &traversalIndex,
-                sceneRoot: sceneRoot,
-                coord: coord
-            )
-        }
+        return material
     }
 
-    // MARK: - Highlight
-
-    private func addHighlight(to parent: SCNNode, width: CGFloat, height: CGFloat) {
-        let highlightPlane = SCNPlane(width: width, height: height)
+    private func makeHighlight(width: CGFloat, height: CGFloat) -> SCNNode {
+        let plane = SCNPlane(width: width, height: height)
         let mat = SCNMaterial()
         mat.diffuse.contents = NSColor.controlAccentColor.withAlphaComponent(0.25)
         mat.lightingModel = .constant
         mat.isDoubleSided = true
-        highlightPlane.materials = [mat]
-        let node = SCNNode(geometry: highlightPlane)
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
         node.name = "_highlight"
         node.position = SCNVector3(0, 0, 0.2)
-        parent.addChildNode(node)
+        return node
     }
 
     private func updateBorderColor(_ container: SCNNode, isSelected: Bool) {
@@ -402,9 +563,9 @@ private struct SceneKitView: NSViewRepresentable {
         }
     }
 
-    // MARK: - Border
-
-    private func addBorder(to parent: SCNNode, width: CGFloat, height: CGFloat, isSelected: Bool) {
+    private func makeBorderGroup(width: CGFloat, height: CGFloat, isSelected: Bool) -> SCNNode {
+        let group = SCNNode()
+        group.name = "_border"
         let hw = Float(width) / 2
         let hh = Float(height) / 2
         let corners: [SCNVector3] = [
@@ -416,8 +577,6 @@ private struct SceneKitView: NSViewRepresentable {
             ? .controlAccentColor.withAlphaComponent(0.9)
             : NSColor(white: 0.5, alpha: 0.5)
 
-        let borderGroup = SCNNode()
-        borderGroup.name = "_border"
         for (a, b) in edges {
             let p0 = corners[a], p1 = corners[b]
             let dx = p1.x - p0.x, dy = p1.y - p0.y
@@ -433,12 +592,10 @@ private struct SceneKitView: NSViewRepresentable {
             let edgeNode = SCNNode(geometry: edgePlane)
             edgeNode.position = SCNVector3((p0.x + p1.x) / 2, (p0.y + p1.y) / 2, 0.1)
             edgeNode.eulerAngles.z = atan2(dy, dx)
-            borderGroup.addChildNode(edgeNode)
+            group.addChildNode(edgeNode)
         }
-        parent.addChildNode(borderGroup)
+        return group
     }
-
-    // MARK: - Label
 
     private func makeLabel(_ text: String, width: CGFloat, height: CGFloat, isSelected: Bool) -> SCNNode {
         let scnText = SCNText(string: text, extrusionDepth: 0)
@@ -468,13 +625,26 @@ private struct SceneKitView: NSViewRepresentable {
         return textNode
     }
 
+    /// Adds a highlight overlay to the given container. Used by the selection
+    /// branch in `updateNSView` when the user changes selection between ticks.
+    /// Kept as a convenience wrapper over `makeHighlight` for that call site.
+    private func addHighlight(to parent: SCNNode, width: CGFloat, height: CGFloat) {
+        parent.addChildNode(makeHighlight(width: width, height: height))
+    }
+
     // MARK: - Coordinator
 
     final class Coordinator: NSObject {
         var selectedNodeID: Binding<UUID?>
         var measurementHoverID: Binding<UUID?>
         weak var scnView: InspectSCNView?
+        /// Indexed by the per-capture UUID. Rebuilt on every tick since
+        /// `HierarchyScanner` issues fresh UUIDs each scan.
         var nodeMap: [UUID: NodeEntry] = [:]
+        /// Indexed by stable path. Persists across ticks and is the key that
+        /// lets live mode update existing SCNNodes in place instead of
+        /// tearing down and rebuilding the whole scene.
+        var pathMap: [String: NodeEntry] = [:]
         var lastRootsHash: Int?
         var lastLayerSpacing: Float?
         var lastShowLabels: Bool?

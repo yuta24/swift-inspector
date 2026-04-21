@@ -177,6 +177,18 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         )
     }
 
+    /// A fingerprint of this node's location among its siblings, used by
+    /// clients to match nodes across capture snapshots (where `ident` is
+    /// re-generated on every scan). Prefers `accessibilityIdentifier` when
+    /// available so identifiers survive sibling reordering, otherwise falls
+    /// back to `className[index]`.
+    public func stablePathSegment(siblingIndex: Int) -> String {
+        if let ident = accessibilityIdentifier, !ident.isEmpty {
+            return "#\(ident)"
+        }
+        return "\(className)[\(siblingIndex)]"
+    }
+
     /// Returns a copy with the given image payloads replacing the existing
     /// `screenshot` / `soloScreenshot`. Used by live mode to carry forward
     /// images from the last full capture into a screenshot-less lite update.
