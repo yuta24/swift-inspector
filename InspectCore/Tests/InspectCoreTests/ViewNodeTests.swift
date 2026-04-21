@@ -123,6 +123,90 @@ final class ViewNodeTests: XCTestCase {
         XCTAssertEqual(decoded.frame.size.width, 100)
     }
 
+    func testLayoutConstraintRoundtrip() throws {
+        let first = LayoutConstraint.Anchor(
+            ownerID: UUID(),
+            description: "UILabel",
+            isLayoutGuide: false,
+            attribute: 5 // leading
+        )
+        let second = LayoutConstraint.Anchor(
+            ownerID: UUID(),
+            description: "UIView.safeAreaLayoutGuide",
+            isLayoutGuide: true,
+            attribute: 5
+        )
+        let constraint = LayoutConstraint(
+            identifier: "label-leading",
+            first: first,
+            second: second,
+            relation: 0,
+            multiplier: 1.0,
+            constant: 16.0,
+            priority: 1000,
+            isActive: true
+        )
+        let node = ViewNode(
+            className: "UILabel",
+            frame: CGRect(x: 0, y: 0, width: 100, height: 20),
+            constraints: [constraint]
+        )
+        let serializer = JSONMessageSerializer()
+        let data = try serializer.encode(.hierarchy(roots: [node]))
+        let decoded = try serializer.decode(data)
+        guard case let .hierarchy(roots) = decoded else {
+            XCTFail("expected hierarchy case")
+            return
+        }
+        XCTAssertEqual(roots.first?.constraints, [constraint])
+    }
+
+    func testConstraintNaNSanitization() {
+        let first = LayoutConstraint.Anchor(
+            ownerID: nil, description: "UIView",
+            isLayoutGuide: false, attribute: 7
+        )
+        let constraint = LayoutConstraint(
+            identifier: nil,
+            first: first,
+            second: nil,
+            relation: 0,
+            multiplier: Double.nan,
+            constant: Double.infinity,
+            priority: Float.nan,
+            isActive: true
+        )
+        XCTAssertEqual(constraint.multiplier, 0)
+        XCTAssertEqual(constraint.constant, 0)
+        XCTAssertEqual(constraint.priority, 0)
+    }
+
+    func testLegacyDecodeWithoutConstraints() throws {
+        // Older servers don't send the `constraints` key. Missing should
+        // decode as empty array, not fail.
+        let node = ViewNode(
+            className: "UIView",
+            frame: CGRect(x: 0, y: 0, width: 10, height: 10)
+        )
+        let encoder = JSONEncoder()
+        let encoded = try encoder.encode(node)
+        var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        json.removeValue(forKey: "constraints")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try JSONDecoder().decode(ViewNode.self, from: stripped)
+        XCTAssertEqual(decoded.constraints, [])
+    }
+
+    func testAttributeAndRelationNames() {
+        XCTAssertEqual(LayoutConstraint.attributeName(5), "leading")
+        XCTAssertEqual(LayoutConstraint.attributeName(7), "width")
+        XCTAssertEqual(LayoutConstraint.attributeName(999), "attr(999)")
+        XCTAssertEqual(LayoutConstraint.relationSymbol(-1), "≤")
+        XCTAssertEqual(LayoutConstraint.relationSymbol(0), "=")
+        XCTAssertEqual(LayoutConstraint.relationSymbol(1), "≥")
+    }
+
     func testFramingRoundtrip() {
         let payload = Data("hello".utf8)
         let framed = Framing.frame(payload)

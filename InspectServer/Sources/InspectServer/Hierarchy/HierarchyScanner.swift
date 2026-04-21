@@ -57,6 +57,11 @@ public enum HierarchyScanner {
             soloScreenshot = nil
         }
 
+        // Register this view's ident BEFORE recursing so constraint anchors
+        // on descendants can resolve UUIDs of their ancestors.
+        let nodeIdent = UUID()
+        ViewIdentRegistry.shared.register(view: view, ident: nodeIdent)
+
         // Collect backing layers of subviews so we can skip them when scanning sublayers
         let subviewLayerIdentifiers = Set(view.subviews.map { ObjectIdentifier($0.layer) })
 
@@ -95,8 +100,7 @@ public enum HierarchyScanner {
 
         let properties = Self.extractProperties(from: view)
 
-        let nodeIdent = UUID()
-        ViewIdentRegistry.shared.register(view: view, ident: nodeIdent)
+        let constraints = Self.extractConstraints(from: view)
 
         // Absolute AABB in window coordinates — used for culling and as a
         // fallback for clients that don't do the recursive origin walk.
@@ -133,6 +137,7 @@ public enum HierarchyScanner {
             isUserInteractionEnabled: view.isUserInteractionEnabled,
             isEnabled: isEnabled,
             properties: properties,
+            constraints: constraints,
             screenshot: groupScreenshot,
             soloScreenshot: soloScreenshot,
             children: children
@@ -263,6 +268,104 @@ public enum HierarchyScanner {
         }
 
         return props
+    }
+
+    // MARK: - Auto Layout constraint extraction
+
+    /// Collects the Auto Layout constraints owned by `view`. Each constraint
+    /// is owned by the closest common ancestor of its two items, so walking
+    /// the tree from the root and recording each view's `.constraints` gives
+    /// full coverage without duplicates. Private system-internal constraint
+    /// subclasses are filtered out.
+    private static func extractConstraints(from view: UIView) -> [LayoutConstraint] {
+        view.constraints.compactMap { constraint in
+            let constraintClass = String(describing: type(of: constraint))
+            // Skip UIKit-generated constraint subclasses — they describe
+            // system layout (safe area, keyboard, etc.) or the implicit
+            // frame translation that UIKit adds for views with
+            // `translatesAutoresizingMaskIntoConstraints = true`. These
+            // would drown out the developer's own rules (four implicit
+            // constraints per legacy view).
+            if constraintClass.hasPrefix("_")
+                || constraintClass.hasPrefix("NSIB")
+                || constraintClass == "NSAutoresizingMaskLayoutConstraint" {
+                return nil
+            }
+
+            guard let first = makeAnchor(
+                item: constraint.firstItem,
+                attribute: constraint.firstAttribute
+            ) else {
+                return nil
+            }
+
+            let second: LayoutConstraint.Anchor? = {
+                // `.notAnAttribute` (rawValue == 0) means there is no second
+                // item (e.g. width/height constants). UIKit also returns
+                // `firstItem` with a non-nil secondItem == nil occasionally;
+                // treat both as absent.
+                guard constraint.secondAttribute != .notAnAttribute else { return nil }
+                return makeAnchor(
+                    item: constraint.secondItem,
+                    attribute: constraint.secondAttribute
+                )
+            }()
+
+            return LayoutConstraint(
+                identifier: constraint.identifier,
+                first: first,
+                second: second,
+                relation: constraint.relation.rawValue,
+                multiplier: Double(constraint.multiplier),
+                constant: Double(constraint.constant),
+                priority: constraint.priority.rawValue,
+                isActive: constraint.isActive
+            )
+        }
+    }
+
+    private static func makeAnchor(
+        item: AnyObject?,
+        attribute: NSLayoutConstraint.Attribute
+    ) -> LayoutConstraint.Anchor? {
+        if let view = item as? UIView {
+            return LayoutConstraint.Anchor(
+                ownerID: ViewIdentRegistry.shared.ident(for: view),
+                description: String(describing: type(of: view)),
+                isLayoutGuide: false,
+                attribute: attribute.rawValue
+            )
+        }
+        if let guide = item as? UILayoutGuide {
+            let ownerClass = guide.owningView.map { String(describing: type(of: $0)) } ?? "?"
+            let guideName = guideIdentifier(guide)
+            return LayoutConstraint.Anchor(
+                ownerID: guide.owningView.flatMap { ViewIdentRegistry.shared.ident(for: $0) },
+                description: "\(ownerClass).\(guideName)",
+                isLayoutGuide: true,
+                attribute: attribute.rawValue
+            )
+        }
+        if item == nil {
+            return nil
+        }
+        // Unknown item type (should be rare) — keep the constraint with a
+        // descriptive name so the user still sees it.
+        return LayoutConstraint.Anchor(
+            ownerID: nil,
+            description: String(describing: type(of: item!)),
+            isLayoutGuide: false,
+            attribute: attribute.rawValue
+        )
+    }
+
+    private static func guideIdentifier(_ guide: UILayoutGuide) -> String {
+        if guide === guide.owningView?.safeAreaLayoutGuide { return "safeAreaLayoutGuide" }
+        if guide === guide.owningView?.layoutMarginsGuide { return "layoutMarginsGuide" }
+        if guide === guide.owningView?.readableContentGuide { return "readableContentGuide" }
+        if guide === guide.owningView?.keyboardLayoutGuide { return "keyboardLayoutGuide" }
+        if let id = guide.identifier, !id.isEmpty { return id }
+        return "layoutGuide"
     }
 
     // MARK: - Type-specific property extraction

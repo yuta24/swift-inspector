@@ -16,7 +16,7 @@ struct ContentView: View {
             )
         }
         .inspector(isPresented: $showInspector) {
-            InspectorView(node: model.selectedNode)
+            InspectorView(node: model.selectedNode, selectedNodeID: $model.selectedNodeID)
                 .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .toolbar {
@@ -146,6 +146,7 @@ private struct DevicePickerBar: View {
 
 private struct InspectorView: View {
     let node: ViewNode?
+    @Binding var selectedNodeID: UUID?
 
     var body: some View {
         if let node {
@@ -167,6 +168,10 @@ private struct InspectorView: View {
                     LayerSection(node: node)
                     InteractionSection(node: node)
                     AccessibilitySection(node: node)
+                    ConstraintsSection(
+                        node: node,
+                        onNavigate: { id in selectedNodeID = id }
+                    )
                     TypePropertiesSection(properties: node.properties)
                     ChildrenSection(count: node.children.count)
                 }
@@ -477,6 +482,130 @@ private struct AccessibilitySection: View {
                 SectionHeader("Accessibility", icon: "accessibility")
             }
         }
+    }
+}
+
+// MARK: - Constraints Section
+
+private struct ConstraintsSection: View {
+    let node: ViewNode
+    let onNavigate: (UUID) -> Void
+
+    var body: some View {
+        if !node.constraints.isEmpty {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(node.constraints.enumerated()), id: \.offset) { _, constraint in
+                        ConstraintRow(
+                            constraint: constraint,
+                            selfID: node.id,
+                            onNavigate: onNavigate
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } label: {
+                SectionHeader("Constraints (\(node.constraints.count))", icon: "ruler")
+            }
+        }
+    }
+}
+
+private struct ConstraintRow: View {
+    let constraint: LayoutConstraint
+    let selfID: UUID
+    let onNavigate: (UUID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                if !constraint.isActive {
+                    Image(systemName: "circle.dashed")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("inactive")
+                }
+                anchorLabel(constraint.first)
+                Text(LayoutConstraint.relationSymbol(constraint.relation))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                if let second = constraint.second {
+                    anchorLabel(second)
+                    if constraint.multiplier != 1.0 {
+                        Text("× \(formatNumber(constraint.multiplier))")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    if constraint.constant != 0 {
+                        Text(formatSignedConstant(constraint.constant))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                } else {
+                    Text(formatNumber(constraint.constant))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 4)
+                if constraint.priority < 1000 {
+                    Text("@\(Int(constraint.priority))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if let identifier = constraint.identifier, !identifier.isEmpty {
+                Text(identifier)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func anchorLabel(_ anchor: LayoutConstraint.Anchor) -> some View {
+        let name = displayName(for: anchor)
+        let attr = LayoutConstraint.attributeName(anchor.attribute)
+        let label = "\(name).\(attr)"
+
+        if let id = anchor.ownerID, id != selfID {
+            Button {
+                onNavigate(id)
+            } label: {
+                Text(label)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+            .help("Jump to \(name)")
+        } else {
+            Text(label)
+                .font(.caption.monospaced())
+                .foregroundStyle(anchor.ownerID == selfID ? .primary : .secondary)
+        }
+    }
+
+    private func displayName(for anchor: LayoutConstraint.Anchor) -> String {
+        if anchor.ownerID == selfID && !anchor.isLayoutGuide {
+            return "self"
+        }
+        return anchor.description
+    }
+
+    private func formatNumber(_ v: Double) -> String {
+        if v == v.rounded() {
+            return String(format: "%g", v)
+        }
+        return String(format: "%.3g", v)
+    }
+
+    private func formatSignedConstant(_ v: Double) -> String {
+        if v >= 0 {
+            return "+ \(formatNumber(v))"
+        }
+        return "− \(formatNumber(-v))"
     }
 }
 
