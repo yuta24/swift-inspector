@@ -12,6 +12,11 @@ final class InspectAppModel: ObservableObject {
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
     @Published var selectedNodeID: UUID?
+    /// The "reference" node for the distance measurement tool. When this
+    /// and `selectedNodeID` are both set and differ, the inspector shows a
+    /// `Measurement` section and the 3D scene overlays a line between the
+    /// two nodes' centers.
+    @Published var measurementReferenceID: UUID?
     @Published var hierarchyFilter = HierarchyFilter()
     @Published var status: String = "idle"
     @Published var isConnected: Bool = false
@@ -25,6 +30,21 @@ final class InspectAppModel: ObservableObject {
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
         return Self.findNode(id: id, in: roots)
+    }
+
+    var measurementReferenceNode: ViewNode? {
+        guard let id = measurementReferenceID else { return nil }
+        return Self.findNode(id: id, in: roots)
+    }
+
+    /// Pins the currently selected node as the measurement reference.
+    /// Tapping the button again on the same node clears it.
+    func toggleMeasurementReference() {
+        if measurementReferenceID == selectedNodeID {
+            measurementReferenceID = nil
+        } else {
+            measurementReferenceID = selectedNodeID
+        }
     }
 
     init() {
@@ -129,6 +149,12 @@ final class InspectAppModel: ObservableObject {
                 selectedNodeID = roots.first?.id
             } else if selectedNodeID == nil {
                 selectedNodeID = roots.first?.id
+            }
+            // Clear measurement reference if the pinned node no longer
+            // exists in the new hierarchy — otherwise the measurement
+            // section would compare against a phantom frame.
+            if let refID = measurementReferenceID, Self.findNode(id: refID, in: roots) == nil {
+                measurementReferenceID = nil
             }
         case let .error(message):
             logger.error("Model received error: \(message, privacy: .public)")

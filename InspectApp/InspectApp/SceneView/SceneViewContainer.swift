@@ -7,6 +7,7 @@ import InspectCore
 struct SceneViewContainer: View {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
+    @Binding var measurementReferenceID: UUID?
     @State private var layerSpacing: Float = 30
     @State private var showLabels: Bool = true
 
@@ -15,6 +16,7 @@ struct SceneViewContainer: View {
             SceneKitView(
                 roots: roots,
                 selectedNodeID: $selectedNodeID,
+                measurementReferenceID: $measurementReferenceID,
                 layerSpacing: layerSpacing,
                 showLabels: showLabels
             )
@@ -62,6 +64,7 @@ private struct NodeEntry {
 private struct SceneKitView: NSViewRepresentable {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
+    @Binding var measurementReferenceID: UUID?
     let layerSpacing: Float
     let showLabels: Bool
 
@@ -101,6 +104,8 @@ private struct SceneKitView: NSViewRepresentable {
             coord.lastLayerSpacing = layerSpacing
             coord.lastShowLabels = showLabels
             coord.lastSelectedNodeID = selectedNodeID
+            coord.lastMeasurementReferenceID = measurementReferenceID
+            refreshMeasurementLine(coord: coord)
             return
         }
 
@@ -112,6 +117,10 @@ private struct SceneKitView: NSViewRepresentable {
                 entry.snapshotNode.position = pos
             }
             coord.lastLayerSpacing = layerSpacing
+            // Snapshot positions moved, so any existing measurement line is
+            // now anchored to stale Z values. Rebuild it to track the new
+            // endpoints.
+            refreshMeasurementLine(coord: coord)
         }
 
         // Label visibility change
@@ -138,7 +147,106 @@ private struct SceneKitView: NSViewRepresentable {
                 updateBorderColor(newEntry.snapshotNode, isSelected: true)
             }
             coord.lastSelectedNodeID = selectedNodeID
+            refreshMeasurementLine(coord: coord)
         }
+
+        // Measurement reference change: redraw the line
+        if coord.lastMeasurementReferenceID != measurementReferenceID {
+            coord.lastMeasurementReferenceID = measurementReferenceID
+            refreshMeasurementLine(coord: coord)
+        }
+    }
+
+    // MARK: - Measurement line
+
+    private func refreshMeasurementLine(coord: Coordinator) {
+        // Always tear down the existing overlay first; we rebuild from
+        // scratch because the line's geometry depends on two endpoints.
+        coord.measurementNode?.removeFromParentNode()
+        coord.measurementNode = nil
+
+        guard
+            let refID = measurementReferenceID,
+            let selID = selectedNodeID,
+            refID != selID,
+            let refEntry = coord.nodeMap[refID],
+            let selEntry = coord.nodeMap[selID],
+            let sceneRoot = coord.scnView?.scene?.rootNode
+        else { return }
+
+        let overlay = makeMeasurementNode(
+            from: refEntry.snapshotNode.position,
+            to: selEntry.snapshotNode.position
+        )
+        sceneRoot.addChildNode(overlay)
+        coord.measurementNode = overlay
+    }
+
+    private func makeMeasurementNode(from start: SCNVector3, to end: SCNVector3) -> SCNNode {
+        let root = SCNNode()
+        root.name = "_measurement"
+
+        // Build the line as a thin box oriented along the segment. A box is
+        // simpler than a cylinder to position and renders crisply in 2D
+        // orbit without lighting artefacts.
+        let delta = SCNVector3(end.x - start.x, end.y - start.y, end.z - start.z)
+        let length = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z)
+        guard length > 0.001 else { return root }
+
+        let thickness: CGFloat = 1.2
+        let box = SCNBox(width: CGFloat(length), height: thickness, length: thickness, chamferRadius: 0)
+        let lineMat = SCNMaterial()
+        lineMat.diffuse.contents = NSColor.systemYellow
+        lineMat.lightingModel = .constant
+        lineMat.isDoubleSided = true
+        box.materials = [lineMat]
+        let lineNode = SCNNode(geometry: box)
+
+        // Align box's +X axis with the segment direction.
+        let midpoint = SCNVector3((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
+        lineNode.position = midpoint
+        // Orientation: rotation_xy around Z, then pitch around Y for depth tilt.
+        let yaw = atan2(delta.y, delta.x)
+        let pitch = atan2(-delta.z, sqrt(delta.x * delta.x + delta.y * delta.y))
+        lineNode.eulerAngles = SCNVector3(0, pitch, yaw)
+        root.addChildNode(lineNode)
+
+        // Endpoint markers (small spheres) at reference and target.
+        for point in [start, end] {
+            let sphere = SCNSphere(radius: 2.5)
+            let mat = SCNMaterial()
+            mat.diffuse.contents = NSColor.systemYellow
+            mat.lightingModel = .constant
+            sphere.materials = [mat]
+            let node = SCNNode(geometry: sphere)
+            node.position = point
+            root.addChildNode(node)
+        }
+
+        // Distance label positioned at the midpoint, slightly above the line.
+        let label = SCNText(string: String(format: "%.1f pt", length), extrusionDepth: 0)
+        label.font = NSFont.monospacedSystemFont(ofSize: 5, weight: .semibold)
+        label.flatness = 0.2
+        let labelMat = SCNMaterial()
+        labelMat.diffuse.contents = NSColor.systemYellow
+        labelMat.lightingModel = .constant
+        labelMat.isDoubleSided = true
+        label.materials = [labelMat]
+        let labelNode = SCNNode(geometry: label)
+        let (_, bbMax) = labelNode.boundingBox
+        labelNode.position = SCNVector3(
+            midpoint.x - CGFloat(bbMax.x) / 2,
+            midpoint.y + 4,
+            midpoint.z + 0.5
+        )
+        root.addChildNode(labelNode)
+
+        // Draw the whole overlay on top of view planes.
+        for node in [lineNode] + root.childNodes where node !== lineNode {
+            node.renderingOrder = 10_000
+        }
+        lineNode.renderingOrder = 10_000
+        return root
     }
 
     // MARK: - Full scene rebuild
@@ -434,6 +542,10 @@ private struct SceneKitView: NSViewRepresentable {
         var lastLayerSpacing: Float?
         var lastShowLabels: Bool?
         var lastSelectedNodeID: UUID??
+        var lastMeasurementReferenceID: UUID??
+        /// Root SCNNode for the measurement overlay (line + markers +
+        /// distance label). Nil when the measurement tool isn't active.
+        var measurementNode: SCNNode?
 
         init(selectedNodeID: Binding<UUID?>) {
             self.selectedNodeID = selectedNodeID

@@ -12,12 +12,18 @@ struct ContentView: View {
         } detail: {
             DetailContentView(
                 roots: model.roots,
-                selectedNodeID: $model.selectedNodeID
+                selectedNodeID: $model.selectedNodeID,
+                measurementReferenceID: $model.measurementReferenceID
             )
         }
         .inspector(isPresented: $showInspector) {
-            InspectorView(node: model.selectedNode, selectedNodeID: $model.selectedNodeID)
-                .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            InspectorView(
+                node: model.selectedNode,
+                referenceNode: model.measurementReferenceNode,
+                selectedNodeID: $model.selectedNodeID,
+                measurementReferenceID: $model.measurementReferenceID
+            )
+            .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -46,6 +52,7 @@ struct ContentView: View {
 private struct DetailContentView: View {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
+    @Binding var measurementReferenceID: UUID?
 
     var body: some View {
         ZStack {
@@ -58,7 +65,8 @@ private struct DetailContentView: View {
             } else {
                 SceneViewContainer(
                     roots: roots,
-                    selectedNodeID: $selectedNodeID
+                    selectedNodeID: $selectedNodeID,
+                    measurementReferenceID: $measurementReferenceID
                 )
             }
         }
@@ -146,7 +154,9 @@ private struct DevicePickerBar: View {
 
 private struct InspectorView: View {
     let node: ViewNode?
+    let referenceNode: ViewNode?
     @Binding var selectedNodeID: UUID?
+    @Binding var measurementReferenceID: UUID?
 
     var body: some View {
         if let node {
@@ -164,6 +174,12 @@ private struct InspectorView: View {
 
                     ScreenshotSection(node: node)
                     FrameSection(frame: node.frame)
+                    MeasurementSection(
+                        selection: node,
+                        reference: referenceNode,
+                        measurementReferenceID: $measurementReferenceID,
+                        onNavigate: { id in selectedNodeID = id }
+                    )
                     AppearanceSection(node: node)
                     LayerSection(node: node)
                     InteractionSection(node: node)
@@ -481,6 +497,160 @@ private struct AccessibilitySection: View {
             } label: {
                 SectionHeader("Accessibility", icon: "accessibility")
             }
+        }
+    }
+}
+
+// MARK: - Measurement Section
+
+private struct MeasurementSection: View {
+    let selection: ViewNode
+    let reference: ViewNode?
+    @Binding var measurementReferenceID: UUID?
+    let onNavigate: (UUID) -> Void
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                pinButton
+                if let reference, reference.id != selection.id {
+                    referenceRow(reference)
+                    Divider()
+                    MeasurementRows(
+                        measurement: FrameMeasurement(
+                            reference: reference.windowFrame,
+                            target: selection.windowFrame
+                        )
+                    )
+                } else if let reference, reference.id == selection.id {
+                    Text("Select another view to measure the distance from here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        } label: {
+            SectionHeader("Measurement", icon: "ruler")
+        }
+    }
+
+    private var pinButton: some View {
+        let isPinned = measurementReferenceID == selection.id
+        return Button {
+            measurementReferenceID = isPinned ? nil : selection.id
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+                Text(isPinned ? "Clear reference" : "Pin as reference")
+            }
+            .font(.caption)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func referenceRow(_ reference: ViewNode) -> some View {
+        HStack(spacing: 6) {
+            PropertyLabel("Reference")
+            Button {
+                onNavigate(reference.id)
+            } label: {
+                Text(reference.className)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.tint)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .help("Jump to \(reference.className)")
+            Spacer(minLength: 4)
+            Button {
+                measurementReferenceID = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear reference")
+        }
+    }
+}
+
+private struct MeasurementRows: View {
+    let measurement: FrameMeasurement
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row(
+                "Δx",
+                value: measurement.horizontalGap,
+                descriptor: horizontalDescriptor,
+                zeroCaption: "overlapping x"
+            )
+            row(
+                "Δy",
+                value: measurement.verticalGap,
+                descriptor: verticalDescriptor,
+                zeroCaption: "overlapping y"
+            )
+            HStack(spacing: 8) {
+                PropertyLabel("Center")
+                PropertyValue(format(measurement.centerDistance))
+                Text("(Δ \(format(measurement.centerDelta.width)), \(format(measurement.centerDelta.height)))")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            HStack(spacing: 8) {
+                PropertyLabel("Relation")
+                PropertyValue(describe(measurement.relationship))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(
+        _ label: String,
+        value: CGFloat,
+        descriptor: String,
+        zeroCaption: String
+    ) -> some View {
+        HStack(spacing: 8) {
+            PropertyLabel(label)
+            PropertyValue(format(abs(value)))
+            if value == 0 {
+                Text(zeroCaption)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(descriptor)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var horizontalDescriptor: String {
+        measurement.horizontalGap > 0 ? "target is right of reference"
+            : "target is left of reference"
+    }
+
+    private var verticalDescriptor: String {
+        measurement.verticalGap > 0 ? "target is below reference"
+            : "target is above reference"
+    }
+
+    private func format(_ v: CGFloat) -> String {
+        if v == v.rounded() { return String(format: "%g pt", v) }
+        return String(format: "%.2f pt", v)
+    }
+
+    private func describe(_ r: FrameMeasurement.Relationship) -> String {
+        switch r {
+        case .disjoint: return "disjoint"
+        case .overlapping: return "overlapping"
+        case .targetInsideReference: return "inside reference"
+        case .referenceInsideTarget: return "contains reference"
+        case .identical: return "identical"
         }
     }
 }

@@ -364,7 +364,7 @@ public enum HierarchyScanner {
         if guide === guide.owningView?.layoutMarginsGuide { return "layoutMarginsGuide" }
         if guide === guide.owningView?.readableContentGuide { return "readableContentGuide" }
         if guide === guide.owningView?.keyboardLayoutGuide { return "keyboardLayoutGuide" }
-        if let id = guide.identifier, !id.isEmpty { return id }
+        if !guide.identifier.isEmpty { return guide.identifier }
         return "layoutGuide"
     }
 
