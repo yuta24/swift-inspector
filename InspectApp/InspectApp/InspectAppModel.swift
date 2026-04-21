@@ -17,6 +17,10 @@ final class InspectAppModel: ObservableObject {
     /// `Measurement` section and the 3D scene overlays a line between the
     /// two nodes' centers.
     @Published var measurementReferenceID: UUID?
+    /// The node currently being Option-hovered in the 3D scene. LookIn-style
+    /// transient "compare" target — takes priority over `measurementReferenceID`
+    /// while set, and cleared when Option is released.
+    @Published var measurementHoverID: UUID?
     @Published var hierarchyFilter = HierarchyFilter()
     @Published var status: String = "idle"
     @Published var isConnected: Bool = false
@@ -35,6 +39,18 @@ final class InspectAppModel: ObservableObject {
     var measurementReferenceNode: ViewNode? {
         guard let id = measurementReferenceID else { return nil }
         return Self.findNode(id: id, in: roots)
+    }
+
+    /// The "compare" node currently shown alongside the selection. Option-hover
+    /// wins over the pinned reference so transient exploration doesn't require
+    /// re-pinning; when Option is released, `measurementHoverID` clears and the
+    /// pinned reference (if any) reappears.
+    var measurementCompareNode: ViewNode? {
+        if let id = measurementHoverID,
+           let node = Self.findNode(id: id, in: roots) {
+            return node
+        }
+        return measurementReferenceNode
     }
 
     /// Pins the currently selected node as the measurement reference.
@@ -155,6 +171,9 @@ final class InspectAppModel: ObservableObject {
             // section would compare against a phantom frame.
             if let refID = measurementReferenceID, Self.findNode(id: refID, in: roots) == nil {
                 measurementReferenceID = nil
+            }
+            if let hoverID = measurementHoverID, Self.findNode(id: hoverID, in: roots) == nil {
+                measurementHoverID = nil
             }
         case let .error(message):
             logger.error("Model received error: \(message, privacy: .public)")

@@ -13,13 +13,15 @@ struct ContentView: View {
             DetailContentView(
                 roots: model.roots,
                 selectedNodeID: $model.selectedNodeID,
-                measurementReferenceID: $model.measurementReferenceID
+                measurementReferenceID: $model.measurementReferenceID,
+                measurementHoverID: $model.measurementHoverID
             )
         }
         .inspector(isPresented: $showInspector) {
             InspectorView(
                 node: model.selectedNode,
-                referenceNode: model.measurementReferenceNode,
+                compareNode: model.measurementCompareNode,
+                isHoveringCompare: model.measurementHoverID != nil,
                 selectedNodeID: $model.selectedNodeID,
                 measurementReferenceID: $model.measurementReferenceID
             )
@@ -53,6 +55,7 @@ private struct DetailContentView: View {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
     @Binding var measurementReferenceID: UUID?
+    @Binding var measurementHoverID: UUID?
 
     var body: some View {
         ZStack {
@@ -66,7 +69,8 @@ private struct DetailContentView: View {
                 SceneViewContainer(
                     roots: roots,
                     selectedNodeID: $selectedNodeID,
-                    measurementReferenceID: $measurementReferenceID
+                    measurementReferenceID: $measurementReferenceID,
+                    measurementHoverID: $measurementHoverID
                 )
             }
         }
@@ -154,7 +158,8 @@ private struct DevicePickerBar: View {
 
 private struct InspectorView: View {
     let node: ViewNode?
-    let referenceNode: ViewNode?
+    let compareNode: ViewNode?
+    let isHoveringCompare: Bool
     @Binding var selectedNodeID: UUID?
     @Binding var measurementReferenceID: UUID?
 
@@ -176,7 +181,8 @@ private struct InspectorView: View {
                     FrameSection(frame: node.frame)
                     MeasurementSection(
                         selection: node,
-                        reference: referenceNode,
+                        compare: compareNode,
+                        isHoveringCompare: isHoveringCompare,
                         measurementReferenceID: $measurementReferenceID,
                         onNavigate: { id in selectedNodeID = id }
                     )
@@ -505,33 +511,42 @@ private struct AccessibilitySection: View {
 
 private struct MeasurementSection: View {
     let selection: ViewNode
-    let reference: ViewNode?
+    let compare: ViewNode?
+    let isHoveringCompare: Bool
     @Binding var measurementReferenceID: UUID?
     let onNavigate: (UUID) -> Void
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
+                hintRow
                 pinButton
-                if let reference, reference.id != selection.id {
-                    referenceRow(reference)
+                if let compare, compare.id != selection.id {
+                    compareRow(compare)
                     Divider()
                     MeasurementRows(
                         measurement: FrameMeasurement(
-                            reference: reference.windowFrame,
-                            target: selection.windowFrame
+                            reference: selection.windowFrame,
+                            target: compare.windowFrame
                         )
                     )
-                } else if let reference, reference.id == selection.id {
-                    Text("Select another view to measure the distance from here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
         } label: {
             SectionHeader("Measurement", icon: "ruler")
+        }
+    }
+
+    private var hintRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "option")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+            Text("Hold Option and hover a view to measure, or pin one below.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -542,36 +557,38 @@ private struct MeasurementSection: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: isPinned ? "pin.fill" : "pin")
-                Text(isPinned ? "Clear reference" : "Pin as reference")
+                Text(isPinned ? "Unpin this view" : "Pin this view as compare")
             }
             .font(.caption)
         }
         .buttonStyle(.borderless)
     }
 
-    private func referenceRow(_ reference: ViewNode) -> some View {
+    private func compareRow(_ compare: ViewNode) -> some View {
         HStack(spacing: 6) {
-            PropertyLabel("Reference")
+            PropertyLabel(isHoveringCompare ? "Hover" : "Compare")
             Button {
-                onNavigate(reference.id)
+                onNavigate(compare.id)
             } label: {
-                Text(reference.className)
+                Text(compare.className)
                     .font(.caption.monospaced())
                     .foregroundStyle(.tint)
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
-            .help("Jump to \(reference.className)")
+            .help("Jump to \(compare.className)")
             Spacer(minLength: 4)
-            Button {
-                measurementReferenceID = nil
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            if !isHoveringCompare {
+                Button {
+                    measurementReferenceID = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear pinned compare")
             }
-            .buttonStyle(.plain)
-            .help("Clear reference")
         }
     }
 }
@@ -630,13 +647,13 @@ private struct MeasurementRows: View {
     }
 
     private var horizontalDescriptor: String {
-        measurement.horizontalGap > 0 ? "target is right of reference"
-            : "target is left of reference"
+        measurement.horizontalGap > 0 ? "compare is right of selection"
+            : "compare is left of selection"
     }
 
     private var verticalDescriptor: String {
-        measurement.verticalGap > 0 ? "target is below reference"
-            : "target is above reference"
+        measurement.verticalGap > 0 ? "compare is below selection"
+            : "compare is above selection"
     }
 
     private func format(_ v: CGFloat) -> String {
@@ -648,8 +665,8 @@ private struct MeasurementRows: View {
         switch r {
         case .disjoint: return "disjoint"
         case .overlapping: return "overlapping"
-        case .targetInsideReference: return "inside reference"
-        case .referenceInsideTarget: return "contains reference"
+        case .targetInsideReference: return "compare is inside selection"
+        case .referenceInsideTarget: return "selection is inside compare"
         case .identical: return "identical"
         }
     }

@@ -1,5 +1,6 @@
 import SwiftUI
 import SceneKit
+import AppKit
 import InspectCore
 
 // MARK: - SwiftUI Container
@@ -8,6 +9,7 @@ struct SceneViewContainer: View {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
     @Binding var measurementReferenceID: UUID?
+    @Binding var measurementHoverID: UUID?
     @State private var layerSpacing: Float = 30
     @State private var showLabels: Bool = true
 
@@ -17,6 +19,7 @@ struct SceneViewContainer: View {
                 roots: roots,
                 selectedNodeID: $selectedNodeID,
                 measurementReferenceID: $measurementReferenceID,
+                measurementHoverID: $measurementHoverID,
                 layerSpacing: layerSpacing,
                 showLabels: showLabels
             )
@@ -57,6 +60,10 @@ private struct NodeEntry {
     let width: CGFloat
     /// Plane height in SceneKit space, matches `view.bounds.size.height`.
     let height: CGFloat
+    /// Absolute origin in the window (root) coordinate space. Kept so the
+    /// Hyperion-style overlay can reason about edges without re-walking the
+    /// hierarchy.
+    let windowOrigin: CGPoint
 }
 
 // MARK: - NSViewRepresentable
@@ -65,15 +72,19 @@ private struct SceneKitView: NSViewRepresentable {
     let roots: [ViewNode]
     @Binding var selectedNodeID: UUID?
     @Binding var measurementReferenceID: UUID?
+    @Binding var measurementHoverID: UUID?
     let layerSpacing: Float
     let showLabels: Bool
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(selectedNodeID: $selectedNodeID)
+        Coordinator(
+            selectedNodeID: $selectedNodeID,
+            measurementHoverID: $measurementHoverID
+        )
     }
 
-    func makeNSView(context: Context) -> SCNView {
-        let scnView = SCNView()
+    func makeNSView(context: Context) -> InspectSCNView {
+        let scnView = InspectSCNView()
         scnView.allowsCameraControl = true
         scnView.autoenablesDefaultLighting = true
         scnView.backgroundColor = .windowBackgroundColor
@@ -87,15 +98,20 @@ private struct SceneKitView: NSViewRepresentable {
         )
         scnView.addGestureRecognizer(click)
         context.coordinator.scnView = scnView
+        scnView.hoverHandler = { [weak coord = context.coordinator] uuid in
+            coord?.measurementHoverID.wrappedValue = uuid
+        }
 
         return scnView
     }
 
-    func updateNSView(_ scnView: SCNView, context: Context) {
+    func updateNSView(_ scnView: InspectSCNView, context: Context) {
         let coord = context.coordinator
         coord.selectedNodeID = $selectedNodeID
+        coord.measurementHoverID = $measurementHoverID
 
         let rootsHash = roots.hashValue
+        let compareID = measurementHoverID ?? measurementReferenceID
 
         // Full rebuild only when hierarchy data changes
         if coord.lastRootsHash != rootsHash {
@@ -104,8 +120,8 @@ private struct SceneKitView: NSViewRepresentable {
             coord.lastLayerSpacing = layerSpacing
             coord.lastShowLabels = showLabels
             coord.lastSelectedNodeID = selectedNodeID
-            coord.lastMeasurementReferenceID = measurementReferenceID
-            refreshMeasurementLine(coord: coord)
+            coord.lastCompareID = compareID
+            refreshMeasurementOverlay(coord: coord, compareID: compareID)
             return
         }
 
@@ -117,10 +133,7 @@ private struct SceneKitView: NSViewRepresentable {
                 entry.snapshotNode.position = pos
             }
             coord.lastLayerSpacing = layerSpacing
-            // Snapshot positions moved, so any existing measurement line is
-            // now anchored to stale Z values. Rebuild it to track the new
-            // endpoints.
-            refreshMeasurementLine(coord: coord)
+            refreshMeasurementOverlay(coord: coord, compareID: compareID)
         }
 
         // Label visibility change
@@ -133,120 +146,62 @@ private struct SceneKitView: NSViewRepresentable {
 
         // Selection change: toggle highlights
         if coord.lastSelectedNodeID != selectedNodeID {
-            // Remove old highlight
             if let oldID = coord.lastSelectedNodeID as? UUID,
                let oldEntry = coord.nodeMap[oldID] {
                 oldEntry.snapshotNode.childNode(withName: "_highlight", recursively: false)?
                     .removeFromParentNode()
                 updateBorderColor(oldEntry.snapshotNode, isSelected: false)
             }
-            // Add new highlight
             if let newID = selectedNodeID,
                let newEntry = coord.nodeMap[newID] {
                 addHighlight(to: newEntry.snapshotNode, width: newEntry.width, height: newEntry.height)
                 updateBorderColor(newEntry.snapshotNode, isSelected: true)
             }
             coord.lastSelectedNodeID = selectedNodeID
-            refreshMeasurementLine(coord: coord)
+            refreshMeasurementOverlay(coord: coord, compareID: compareID)
         }
 
-        // Measurement reference change: redraw the line
-        if coord.lastMeasurementReferenceID != measurementReferenceID {
-            coord.lastMeasurementReferenceID = measurementReferenceID
-            refreshMeasurementLine(coord: coord)
+        // Compare (hover or pinned reference) change
+        if coord.lastCompareID != compareID {
+            coord.lastCompareID = compareID
+            refreshMeasurementOverlay(coord: coord, compareID: compareID)
         }
     }
 
-    // MARK: - Measurement line
+    // MARK: - Measurement overlay (Hyperion-style)
 
-    private func refreshMeasurementLine(coord: Coordinator) {
-        // Always tear down the existing overlay first; we rebuild from
-        // scratch because the line's geometry depends on two endpoints.
+    private func refreshMeasurementOverlay(coord: Coordinator, compareID: UUID?) {
         coord.measurementNode?.removeFromParentNode()
         coord.measurementNode = nil
 
         guard
-            let refID = measurementReferenceID,
             let selID = selectedNodeID,
-            refID != selID,
-            let refEntry = coord.nodeMap[refID],
-            let selEntry = coord.nodeMap[selID],
+            let compareID,
+            compareID != selID,
+            let anchorEntry = coord.nodeMap[selID],
+            let compareEntry = coord.nodeMap[compareID],
             let sceneRoot = coord.scnView?.scene?.rootNode
         else { return }
 
-        let overlay = makeMeasurementNode(
-            from: refEntry.snapshotNode.position,
-            to: selEntry.snapshotNode.position
+        let anchorRect = CGRect(origin: anchorEntry.windowOrigin,
+                                size: CGSize(width: anchorEntry.width, height: anchorEntry.height))
+        let compareRect = CGRect(origin: compareEntry.windowOrigin,
+                                 size: CGSize(width: compareEntry.width, height: compareEntry.height))
+
+        // Overlay sits slightly above both endpoints so it stays on top of
+        // whichever plane is furthest forward in the stacked layout.
+        let overlayZ = max(anchorEntry.snapshotNode.position.z,
+                           compareEntry.snapshotNode.position.z) + 1.0
+
+        let overlay = MeasurementOverlayBuilder.build(
+            anchorRect: anchorRect,
+            compareRect: compareRect,
+            rootHeight: coord.rootHeight,
+            screenArea: coord.screenArea,
+            overlayZ: overlayZ
         )
         sceneRoot.addChildNode(overlay)
         coord.measurementNode = overlay
-    }
-
-    private func makeMeasurementNode(from start: SCNVector3, to end: SCNVector3) -> SCNNode {
-        let root = SCNNode()
-        root.name = "_measurement"
-
-        // Build the line as a thin box oriented along the segment. A box is
-        // simpler than a cylinder to position and renders crisply in 2D
-        // orbit without lighting artefacts.
-        let delta = SCNVector3(end.x - start.x, end.y - start.y, end.z - start.z)
-        let length = sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z)
-        guard length > 0.001 else { return root }
-
-        let thickness: CGFloat = 1.2
-        let box = SCNBox(width: CGFloat(length), height: thickness, length: thickness, chamferRadius: 0)
-        let lineMat = SCNMaterial()
-        lineMat.diffuse.contents = NSColor.systemYellow
-        lineMat.lightingModel = .constant
-        lineMat.isDoubleSided = true
-        box.materials = [lineMat]
-        let lineNode = SCNNode(geometry: box)
-
-        // Align box's +X axis with the segment direction.
-        let midpoint = SCNVector3((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
-        lineNode.position = midpoint
-        // Orientation: rotation_xy around Z, then pitch around Y for depth tilt.
-        let yaw = atan2(delta.y, delta.x)
-        let pitch = atan2(-delta.z, sqrt(delta.x * delta.x + delta.y * delta.y))
-        lineNode.eulerAngles = SCNVector3(0, pitch, yaw)
-        root.addChildNode(lineNode)
-
-        // Endpoint markers (small spheres) at reference and target.
-        for point in [start, end] {
-            let sphere = SCNSphere(radius: 2.5)
-            let mat = SCNMaterial()
-            mat.diffuse.contents = NSColor.systemYellow
-            mat.lightingModel = .constant
-            sphere.materials = [mat]
-            let node = SCNNode(geometry: sphere)
-            node.position = point
-            root.addChildNode(node)
-        }
-
-        // Distance label positioned at the midpoint, slightly above the line.
-        let label = SCNText(string: String(format: "%.1f pt", length), extrusionDepth: 0)
-        label.font = NSFont.monospacedSystemFont(ofSize: 5, weight: .semibold)
-        label.flatness = 0.2
-        let labelMat = SCNMaterial()
-        labelMat.diffuse.contents = NSColor.systemYellow
-        labelMat.lightingModel = .constant
-        labelMat.isDoubleSided = true
-        label.materials = [labelMat]
-        let labelNode = SCNNode(geometry: label)
-        let (_, bbMax) = labelNode.boundingBox
-        labelNode.position = SCNVector3(
-            midpoint.x - CGFloat(bbMax.x) / 2,
-            midpoint.y + 4,
-            midpoint.z + 0.5
-        )
-        root.addChildNode(labelNode)
-
-        // Draw the whole overlay on top of view planes.
-        for node in [lineNode] + root.childNodes where node !== lineNode {
-            node.renderingOrder = 10_000
-        }
-        lineNode.renderingOrder = 10_000
-        return root
     }
 
     // MARK: - Full scene rebuild
@@ -260,6 +215,8 @@ private struct SceneKitView: NSViewRepresentable {
 
         guard !roots.isEmpty else {
             scnView.scene = scene
+            coord.rootHeight = 0
+            coord.screenArea = .zero
             return
         }
 
@@ -268,6 +225,8 @@ private struct SceneKitView: NSViewRepresentable {
         // multiple windows (keyboard, alert) have different heights.
         let screenArea = roots.map(\.windowFrame).reduce(CGRect.null) { $0.union($1) }
         let rootHeight = screenArea.height
+        coord.rootHeight = rootHeight
+        coord.screenArea = screenArea
 
         var traversalIndex = 0
         for root in roots {
@@ -315,17 +274,12 @@ private struct SceneKitView: NSViewRepresentable {
         sceneRoot: SCNNode,
         coord: Coordinator
     ) {
-        // On-device visual footprint. For identity transforms this equals
-        // `bounds.size`; for transformed views it is the AABB.
         let w = node.frame.size.width
         let h = node.frame.size.height
         guard w >= 1, h >= 1 else { return }
         guard !node.isHidden else { return }
-        // Skip fully transparent container-like views; leaves may still carry
-        // a meaningful screenshot even at alpha 0 when driven by animations.
         if node.alpha <= 0.001, !node.children.isEmpty { return }
 
-        // Absolute origin in the root (window) coordinate system.
         let absoluteOrigin: CGPoint = {
             guard let parent = parentAbsoluteOrigin else {
                 return node.frame.origin
@@ -337,10 +291,6 @@ private struct SceneKitView: NSViewRepresentable {
         }()
         let absoluteFrame = CGRect(origin: absoluteOrigin, size: CGSize(width: w, height: h))
 
-        // Culling: skip views fully outside the visible area. A generous
-        // margin keeps popovers and safe-area overflow in the scene. Use the
-        // server's `windowFrame` when available — it is the authoritative
-        // AABB including transforms.
         let cullReference = node.windowFrame == .zero ? absoluteFrame : node.windowFrame
         let margin: CGFloat = 50
         let expanded = screenArea.insetBy(dx: -margin, dy: -margin)
@@ -349,32 +299,23 @@ private struct SceneKitView: NSViewRepresentable {
         let myIndex = traversalIndex
         traversalIndex += 1
 
-        // SceneKit position: center of the plane, Y flipped against rootHeight.
-        // A tiny per-node Z offset breaks z-fighting when layerSpacing=0.
         let sceneX = Float(absoluteOrigin.x + w / 2)
         let sceneY = Float(rootHeight - (absoluteOrigin.y + h / 2))
         let sceneZ = layerSpacing * Float(depth) + Float(myIndex) * 0.01
 
         let isSelected = node.id == selectedNodeID
 
-        // Container node
         let containerNode = SCNNode()
         containerNode.name = node.id.uuidString
         containerNode.position = SCNVector3(sceneX, sceneY, sceneZ)
-        // Enforce deterministic draw order for overlapping semi-transparent planes
         containerNode.renderingOrder = myIndex
         sceneRoot.addChildNode(containerNode)
 
-        // Plane with screenshot texture
         let plane = SCNPlane(width: w, height: h)
         let material = SCNMaterial()
         material.isDoubleSided = true
         material.lightingModel = .constant
 
-        // Prefer soloScreenshot (per-layer, PNG with transparency).
-        // For leaf nodes, fall back to groupScreenshot (no children → no duplication).
-        // For container nodes with no soloScreenshot, keep transparent to avoid
-        // full-screen content being duplicated across multiple layers.
         if let soloData = node.soloScreenshot, let image = NSImage(data: soloData) {
             material.diffuse.contents = image
             material.transparency = CGFloat(node.alpha)
@@ -399,32 +340,27 @@ private struct SceneKitView: NSViewRepresentable {
         planeNode.name = "_plane"
         containerNode.addChildNode(planeNode)
 
-        // Border
         addBorder(to: containerNode, width: w, height: h, isSelected: isSelected)
 
-        // Selection highlight
         if isSelected {
             addHighlight(to: containerNode, width: w, height: h)
         }
 
-        // Label
         if w >= 20 && h >= 10 {
             let labelNode = makeLabel(node.className, width: w, height: h, isSelected: isSelected)
             labelNode.isHidden = !showLabels
             containerNode.addChildNode(labelNode)
         }
 
-        // Register in node map for incremental updates
         coord.nodeMap[node.id] = NodeEntry(
             snapshotNode: containerNode,
             depth: depth,
             traversalIndex: myIndex,
             width: w,
-            height: h
+            height: h,
+            windowOrigin: absoluteOrigin
         )
 
-        // Recurse children. Pass this node's absolute origin and bounds
-        // origin so children can compute their own absolute positions.
         let parentBounds = node.boundsOrigin
         for child in node.children {
             buildNodes(
@@ -536,19 +472,29 @@ private struct SceneKitView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var selectedNodeID: Binding<UUID?>
-        weak var scnView: SCNView?
+        var measurementHoverID: Binding<UUID?>
+        weak var scnView: InspectSCNView?
         var nodeMap: [UUID: NodeEntry] = [:]
         var lastRootsHash: Int?
         var lastLayerSpacing: Float?
         var lastShowLabels: Bool?
         var lastSelectedNodeID: UUID??
-        var lastMeasurementReferenceID: UUID??
-        /// Root SCNNode for the measurement overlay (line + markers +
-        /// distance label). Nil when the measurement tool isn't active.
+        var lastCompareID: UUID?
+        /// Root SCNNode for the Hyperion-style measurement overlay. Nil when
+        /// the tool is idle (no compare node resolved).
         var measurementNode: SCNNode?
+        /// Cached from the last rebuild — lets the overlay builder convert
+        /// window-frame geometry to scene coordinates without re-walking the
+        /// hierarchy.
+        var rootHeight: CGFloat = 0
+        var screenArea: CGRect = .zero
 
-        init(selectedNodeID: Binding<UUID?>) {
+        init(
+            selectedNodeID: Binding<UUID?>,
+            measurementHoverID: Binding<UUID?>
+        ) {
             self.selectedNodeID = selectedNodeID
+            self.measurementHoverID = measurementHoverID
         }
 
         @objc func handleClick(_ gesture: NSClickGestureRecognizer) {
@@ -576,6 +522,552 @@ private struct SceneKitView: NSViewRepresentable {
                 current = n.parent
             }
             return nil
+        }
+    }
+}
+
+// MARK: - SCNView subclass with Option-hover hit-testing
+
+/// Extends `SCNView` with LookIn-style distance measurement input: while the
+/// Option key is held, the view under the cursor streams out via
+/// `hoverHandler`. Releasing Option clears the hover so any pinned compare
+/// node returns to the foreground.
+final class InspectSCNView: SCNView {
+    var hoverHandler: ((UUID?) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+    private var optionHeld: Bool = false
+    private var lastHoverID: UUID?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = trackingArea {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        // Re-derive from the event so the hover state self-corrects when
+        // Option was toggled while our window lacked focus (flagsChanged
+        // only fires on the currently-focused responder chain).
+        let hasOption = event.modifierFlags.contains(.option)
+        optionHeld = hasOption
+        if hasOption {
+            let point = convert(event.locationInWindow, from: nil)
+            updateHover(at: point)
+        } else {
+            publishHover(nil)
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        let hasOption = event.modifierFlags.contains(.option)
+        optionHeld = hasOption
+        if hasOption {
+            let point = convert(event.locationInWindow, from: nil)
+            updateHover(at: point)
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        publishHover(nil)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        super.flagsChanged(with: event)
+        let newOption = event.modifierFlags.contains(.option)
+        guard newOption != optionHeld else { return }
+        optionHeld = newOption
+        if newOption {
+            // Snap to whatever is already under the cursor the instant Option
+            // is pressed — matches LookIn's feel of "hold to measure."
+            if let window {
+                let windowPoint = window.mouseLocationOutsideOfEventStream
+                let point = convert(windowPoint, from: nil)
+                if bounds.contains(point) {
+                    updateHover(at: point)
+                }
+            }
+        } else {
+            publishHover(nil)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Leaving a window with Option still logically down would otherwise
+        // leak the last hover. Reset on every window transition.
+        optionHeld = false
+        publishHover(nil)
+    }
+
+    private func updateHover(at point: CGPoint) {
+        let hits = hitTest(point, options: [
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .sortResults: true,
+        ])
+        for hit in hits {
+            if let uuid = findNodeUUID(in: hit.node) {
+                publishHover(uuid)
+                return
+            }
+        }
+        publishHover(nil)
+    }
+
+    private func publishHover(_ uuid: UUID?) {
+        guard uuid != lastHoverID else { return }
+        lastHoverID = uuid
+        hoverHandler?(uuid)
+    }
+
+    private func findNodeUUID(in node: SCNNode) -> UUID? {
+        var current: SCNNode? = node
+        while let n = current {
+            if let name = n.name, let uuid = UUID(uuidString: name) {
+                return uuid
+            }
+            current = n.parent
+        }
+        return nil
+    }
+}
+
+// MARK: - Hyperion-style overlay builder
+
+/// Builds a SceneKit overlay that mirrors Hyperion's measurements plugin
+/// visuals: primary-colored dashed extension guides along the anchor's axes,
+/// solid dimension lines with T-serifs at each measured edge, and rounded
+/// pill labels reporting the per-edge distance in points. The compare view
+/// gets a dashed secondary outline so it reads as "the thing being measured
+/// to" rather than a second selection.
+///
+/// All geometry is in scene coordinates. Window-frame math (like Hyperion's
+/// original UIKit version) happens first; the final conversion to scene
+/// coordinates applies a Y flip against `rootHeight`.
+private enum MeasurementOverlayBuilder {
+    static let primaryColor = NSColor(srgbRed: 43.0/255.0, green: 87.0/255.0, blue: 244.0/255.0, alpha: 1.0)
+    static let secondaryColor = NSColor(srgbRed: 199.0/255.0, green: 199.0/255.0, blue: 204.0/255.0, alpha: 1.0)
+
+    /// Lazily-built repeating textures. Scene units are "pt" so these match
+    /// the sizes used by Hyperion's CAShapeLayer dash patterns.
+    private static let extensionDashTexture = dashTexture(
+        color: primaryColor, dash: 3, gap: 8, thicknessPx: 2
+    )
+    private static let compareDashTexture = dashTexture(
+        color: secondaryColor, dash: 4, gap: 4, thicknessPx: 2
+    )
+
+    static func build(
+        anchorRect: CGRect,
+        compareRect: CGRect,
+        rootHeight: CGFloat,
+        screenArea: CGRect,
+        overlayZ: CGFloat
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "_measurement"
+
+        addCompareDashedBorder(rect: compareRect,
+                               rootHeight: rootHeight,
+                               overlayZ: overlayZ,
+                               into: root)
+        addExtensionGuides(anchor: anchorRect,
+                           screenArea: screenArea,
+                           rootHeight: rootHeight,
+                           overlayZ: overlayZ,
+                           into: root)
+        addDimensionLines(anchor: anchorRect,
+                          compare: compareRect,
+                          rootHeight: rootHeight,
+                          overlayZ: overlayZ,
+                          into: root)
+
+        // Draw the whole overlay on top of planes and their borders; anything
+        // using a renderingOrder of 0..few-hundred lives below.
+        applyRenderingOrder(10_000, to: root)
+        return root
+    }
+
+    // MARK: - Borders and guides
+
+    private static func addCompareDashedBorder(
+        rect: CGRect,
+        rootHeight: CGFloat,
+        overlayZ: CGFloat,
+        into parent: SCNNode
+    ) {
+        // 4 edges of the compare rect, dashed secondary color. Z sits
+        // fractionally behind the dimension lines so labels can overlap the
+        // border without a depth-fight stripe.
+        let tl = CGPoint(x: rect.minX, y: rect.minY)
+        let tr = CGPoint(x: rect.maxX, y: rect.minY)
+        let bl = CGPoint(x: rect.minX, y: rect.maxY)
+        let br = CGPoint(x: rect.maxX, y: rect.maxY)
+        let edges: [(CGPoint, CGPoint)] = [(tl, tr), (tr, br), (br, bl), (bl, tl)]
+        for (start, end) in edges {
+            let node = makeDashedLine(
+                from: scenePoint(start, rootHeight: rootHeight, z: overlayZ - 0.2),
+                to: scenePoint(end, rootHeight: rootHeight, z: overlayZ - 0.2),
+                texture: compareDashTexture.image,
+                patternWidth: compareDashTexture.patternWidth,
+                thickness: 1.0
+            )
+            parent.addChildNode(node)
+        }
+    }
+
+    private static func addExtensionGuides(
+        anchor: CGRect,
+        screenArea: CGRect,
+        rootHeight: CGFloat,
+        overlayZ: CGFloat,
+        into parent: SCNNode
+    ) {
+        // Extend slightly beyond screenArea so users can follow the guide out
+        // past the content area when the camera orbits.
+        let pad: CGFloat = 40
+        let topY = min(anchor.minY, screenArea.minY - pad)
+        let bottomY = max(anchor.maxY, screenArea.maxY + pad)
+        let leftX = min(anchor.minX, screenArea.minX - pad)
+        let rightX = max(anchor.maxX, screenArea.maxX + pad)
+
+        let verticalLeft: [(CGPoint, CGPoint)] = [
+            (CGPoint(x: anchor.minX, y: topY), CGPoint(x: anchor.minX, y: bottomY)),
+            (CGPoint(x: anchor.maxX, y: topY), CGPoint(x: anchor.maxX, y: bottomY)),
+        ]
+        let horizontalPairs: [(CGPoint, CGPoint)] = [
+            (CGPoint(x: leftX, y: anchor.minY), CGPoint(x: rightX, y: anchor.minY)),
+            (CGPoint(x: leftX, y: anchor.maxY), CGPoint(x: rightX, y: anchor.maxY)),
+        ]
+
+        for (start, end) in verticalLeft + horizontalPairs {
+            let node = makeDashedLine(
+                from: scenePoint(start, rootHeight: rootHeight, z: overlayZ - 0.1),
+                to: scenePoint(end, rootHeight: rootHeight, z: overlayZ - 0.1),
+                texture: extensionDashTexture.image,
+                patternWidth: extensionDashTexture.patternWidth,
+                thickness: 0.6
+            )
+            parent.addChildNode(node)
+        }
+    }
+
+    // MARK: - Dimension lines + labels
+
+    /// Mirrors Hyperion's `displayMeasurementViewsForView:comparedToView:`:
+    /// when anchor is inside compare we draw 4 inset distances; otherwise we
+    /// draw only the side(s) where a positive gap exists, using Hyperion's
+    /// "swap and re-measure the gap" convention so labels always read
+    /// positively.
+    private static func addDimensionLines(
+        anchor: CGRect,
+        compare: CGRect,
+        rootHeight: CGFloat,
+        overlayZ: CGFloat,
+        into parent: SCNNode
+    ) {
+        let anchorInsideCompare = compare.contains(anchor)
+
+        if anchorInsideCompare {
+            placeTop(primary: anchor, secondary: compare, inside: true,
+                     rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeBottom(primary: anchor, secondary: compare, inside: true,
+                        rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeLeft(primary: anchor, secondary: compare, inside: true,
+                      rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeRight(primary: anchor, secondary: compare, inside: true,
+                       rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        } else {
+            // Hyperion's trick: pretend compare is the "primary" for the
+            // purposes of `placeTop/...` so the comparison becomes compare-top
+            // vs anchor-below-it. Each `place*` method checks whether a
+            // measurable gap exists in its direction and emits nothing if not.
+            placeTop(primary: compare, secondary: anchor, inside: false,
+                     rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeBottom(primary: compare, secondary: anchor, inside: false,
+                        rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeLeft(primary: compare, secondary: anchor, inside: false,
+                      rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+            placeRight(primary: compare, secondary: anchor, inside: false,
+                       rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        }
+    }
+
+    private static func placeTop(
+        primary: CGRect, secondary: CGRect, inside: Bool,
+        rootHeight: CGFloat, overlayZ: CGFloat, into parent: SCNNode
+    ) {
+        let topPrimary = CGPoint(x: primary.midX, y: primary.minY)
+        if inside {
+            let topSecondary = CGPoint(x: primary.midX, y: secondary.minY)
+            emitDimension(from: topSecondary, to: topPrimary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        } else if primary.minY >= secondary.maxY {
+            let endpoint = CGPoint(x: topPrimary.x, y: secondary.maxY)
+            emitDimension(from: endpoint, to: topPrimary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        }
+    }
+
+    private static func placeBottom(
+        primary: CGRect, secondary: CGRect, inside: Bool,
+        rootHeight: CGFloat, overlayZ: CGFloat, into parent: SCNNode
+    ) {
+        let bottomPrimary = CGPoint(x: primary.midX, y: primary.maxY)
+        if inside {
+            let bottomSecondary = CGPoint(x: primary.midX, y: secondary.maxY)
+            emitDimension(from: bottomPrimary, to: bottomSecondary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        } else if bottomPrimary.y <= secondary.minY {
+            let endpoint = CGPoint(x: bottomPrimary.x, y: secondary.minY)
+            emitDimension(from: bottomPrimary, to: endpoint,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        }
+    }
+
+    private static func placeLeft(
+        primary: CGRect, secondary: CGRect, inside: Bool,
+        rootHeight: CGFloat, overlayZ: CGFloat, into parent: SCNNode
+    ) {
+        let leftPrimary = CGPoint(x: primary.minX, y: primary.midY)
+        if inside {
+            let leftSecondary = CGPoint(x: secondary.minX, y: primary.midY)
+            emitDimension(from: leftSecondary, to: leftPrimary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        } else if leftPrimary.x >= secondary.maxX {
+            let endpoint = CGPoint(x: secondary.maxX, y: leftPrimary.y)
+            emitDimension(from: endpoint, to: leftPrimary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        }
+    }
+
+    private static func placeRight(
+        primary: CGRect, secondary: CGRect, inside: Bool,
+        rootHeight: CGFloat, overlayZ: CGFloat, into parent: SCNNode
+    ) {
+        let rightPrimary = CGPoint(x: primary.maxX, y: primary.midY)
+        if inside {
+            let rightSecondary = CGPoint(x: secondary.maxX, y: primary.midY)
+            emitDimension(from: rightPrimary, to: rightSecondary,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        } else if rightPrimary.x <= secondary.minX {
+            let endpoint = CGPoint(x: secondary.minX, y: rightPrimary.y)
+            emitDimension(from: rightPrimary, to: endpoint,
+                          rootHeight: rootHeight, overlayZ: overlayZ, into: parent)
+        }
+    }
+
+    private static func emitDimension(
+        from start: CGPoint, to end: CGPoint,
+        rootHeight: CGFloat, overlayZ: CGFloat, into parent: SCNNode
+    ) {
+        let length = hypot(end.x - start.x, end.y - start.y)
+        guard length > 0.5 else { return }
+
+        let sceneStart = scenePoint(start, rootHeight: rootHeight, z: overlayZ)
+        let sceneEnd = scenePoint(end, rootHeight: rootHeight, z: overlayZ)
+
+        parent.addChildNode(makeSolidLine(from: sceneStart, to: sceneEnd,
+                                          color: primaryColor, thickness: 0.8))
+        parent.addChildNode(makeSerif(at: sceneStart, along: sceneEnd,
+                                      color: primaryColor))
+        parent.addChildNode(makeSerif(at: sceneEnd, along: sceneStart,
+                                      color: primaryColor))
+
+        let labelText = formatPt(length)
+        let mid = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+        let labelCenter = scenePoint(mid, rootHeight: rootHeight, z: overlayZ + 0.2)
+        parent.addChildNode(makeLabel(text: labelText, at: labelCenter))
+    }
+
+    // MARK: - Line primitives
+
+    private static func makeSolidLine(
+        from start: SCNVector3, to end: SCNVector3,
+        color: NSColor, thickness: CGFloat
+    ) -> SCNNode {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = sqrt(dx * dx + dy * dy)
+        let plane = SCNPlane(width: CGFloat(length), height: thickness)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = color
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
+        node.position = SCNVector3((start.x + end.x) / 2, (start.y + end.y) / 2, start.z)
+        node.eulerAngles.z = atan2(dy, dx)
+        return node
+    }
+
+    /// T-serif at one endpoint of a dimension line — perpendicular to the
+    /// line, matching Hyperion's ±5pt cap tick.
+    private static func makeSerif(at endpoint: SCNVector3, along other: SCNVector3, color: NSColor) -> SCNNode {
+        let dx = other.x - endpoint.x
+        let dy = other.y - endpoint.y
+        let lineAngle = atan2(dy, dx)
+        let serifLength: CGFloat = 8
+        let plane = SCNPlane(width: serifLength, height: 0.8)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = color
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
+        node.position = endpoint
+        // Rotate 90° off the line so the serif crosses it orthogonally.
+        node.eulerAngles.z = lineAngle + .pi / 2
+        return node
+    }
+
+    // MARK: - Dashed line via tiled texture
+
+    private struct DashTexture {
+        let image: NSImage
+        let patternWidth: CGFloat
+    }
+
+    private static func dashTexture(color: NSColor, dash: CGFloat, gap: CGFloat, thicknessPx: CGFloat) -> DashTexture {
+        let patternWidth = dash + gap
+        // Backing bitmap at a super-sampled pixel size — SceneKit otherwise
+        // samples the NSImage at its logical pt size and the dashes get
+        // jaggy once the camera zooms in.
+        let scale: CGFloat = 8
+        let pixelW = max(1, Int((patternWidth * scale).rounded()))
+        let pixelH = max(1, Int((thicknessPx * scale).rounded()))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelW,
+            pixelsHigh: pixelH,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 32
+        ) else {
+            // Fallback: an opaque image of the solid color — better than
+            // crashing if the bitmap rep can't be allocated.
+            let fallback = NSImage(size: NSSize(width: patternWidth, height: thicknessPx))
+            fallback.lockFocus()
+            color.setFill()
+            NSRect(x: 0, y: 0, width: patternWidth, height: thicknessPx).fill()
+            fallback.unlockFocus()
+            return DashTexture(image: fallback, patternWidth: patternWidth)
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: CGFloat(pixelW), height: CGFloat(pixelH)).fill(using: .copy)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: dash * scale, height: CGFloat(pixelH)).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        let image = NSImage(size: NSSize(width: patternWidth, height: thicknessPx))
+        image.addRepresentation(rep)
+        return DashTexture(image: image, patternWidth: patternWidth)
+    }
+
+    private static func makeDashedLine(
+        from start: SCNVector3, to end: SCNVector3,
+        texture: NSImage, patternWidth: CGFloat, thickness: CGFloat
+    ) -> SCNNode {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = sqrt(dx * dx + dy * dy)
+        let plane = SCNPlane(width: CGFloat(length), height: thickness)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = texture
+        mat.diffuse.wrapS = .repeat
+        mat.diffuse.wrapT = .clamp
+        mat.diffuse.minificationFilter = .nearest
+        mat.diffuse.magnificationFilter = .nearest
+        // Scale U so one full dash+gap pattern spans `patternWidth` scene units.
+        let repeats = max(1.0, CGFloat(length) / patternWidth)
+        mat.diffuse.contentsTransform = SCNMatrix4MakeScale(repeats, 1, 1)
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
+        node.position = SCNVector3((start.x + end.x) / 2, (start.y + end.y) / 2, start.z)
+        node.eulerAngles.z = atan2(dy, dx)
+        return node
+    }
+
+    // MARK: - Rounded pill label
+
+    private static func makeLabel(text: String, at center: SCNVector3) -> SCNNode {
+        let image = labelImage(text)
+        let w = image.size.width
+        let h = image.size.height
+        let plane = SCNPlane(width: w, height: h)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = image
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
+        node.position = center
+        return node
+    }
+
+    private static func labelImage(_ text: String) -> NSImage {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: primaryColor,
+        ]
+        let attributed = NSAttributedString(string: text, attributes: attrs)
+        let textSize = attributed.size()
+        let padH: CGFloat = 7
+        let padV: CGFloat = 3
+        let size = NSSize(
+            width: ceil(textSize.width) + padH * 2,
+            height: ceil(textSize.height) + padV * 2
+        )
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer { image.unlockFocus() }
+        let rect = NSRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
+        let radius = rect.height / 2
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        NSColor.white.setFill()
+        path.fill()
+        primaryColor.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+        attributed.draw(at: NSPoint(x: padH, y: padV))
+        return image
+    }
+
+    // MARK: - Helpers
+
+    private static func scenePoint(_ p: CGPoint, rootHeight: CGFloat, z: CGFloat) -> SCNVector3 {
+        SCNVector3(p.x, rootHeight - p.y, z)
+    }
+
+    private static func formatPt(_ v: CGFloat) -> String {
+        if v == v.rounded() { return String(format: "%g pt", v) }
+        return String(format: "%.1f pt", v)
+    }
+
+    private static func applyRenderingOrder(_ order: Int, to node: SCNNode) {
+        node.renderingOrder = order
+        for child in node.childNodes {
+            applyRenderingOrder(order, to: child)
         }
     }
 }
