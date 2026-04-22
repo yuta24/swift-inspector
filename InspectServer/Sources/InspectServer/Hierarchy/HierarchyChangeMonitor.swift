@@ -99,7 +99,7 @@ final class HierarchyChangeMonitor {
         mix(quantize(view.bounds.origin.x), into: &hash)
         mix(quantize(view.bounds.origin.y), into: &hash)
         mix(view.isHidden ? 1 : 0, into: &hash)
-        mix(UInt64(bitPattern: Int64(view.alpha * 1000)), into: &hash)
+        mix(quantize(view.alpha, scale: 1000), into: &hash)
         // Subview count guards against structure changes that happen to
         // preserve every individual subview's own hash.
         mix(UInt64(view.subviews.count), into: &hash)
@@ -108,9 +108,14 @@ final class HierarchyChangeMonitor {
         }
     }
 
-    private func quantize(_ value: CGFloat) -> UInt64 {
-        // (value * 10) rounded, treated as 64-bit unsigned via two's-complement.
-        UInt64(bitPattern: Int64((value * 10).rounded()))
+    private func quantize(_ value: CGFloat, scale: CGFloat = 10) -> UInt64 {
+        // Non-finite values (NaN, ±∞) show up in frames during transforms or
+        // before layout resolves. Mix the raw bit pattern so distinct non-finite
+        // values still contribute distinctly, without crashing the Int64 cast.
+        guard value.isFinite else {
+            return Double(value).bitPattern
+        }
+        return UInt64(bitPattern: Int64((value * scale).rounded()))
     }
 
     private func mix(_ value: UInt64, into hash: inout UInt64) {
