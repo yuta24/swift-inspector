@@ -29,6 +29,12 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                ActivityIndicator(
+                    isConnecting: model.isConnecting,
+                    isInflight: model.isInflight
+                )
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.requestHierarchy()
                 } label: {
@@ -48,6 +54,24 @@ struct ContentView: View {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
             }
+        }
+    }
+}
+
+// MARK: - Activity Indicator
+
+/// Small toolbar spinner that shows when the app is either establishing a
+/// connection or waiting on a hierarchy response. Rendered as an empty view
+/// when idle so it collapses out of the toolbar layout.
+private struct ActivityIndicator: View {
+    let isConnecting: Bool
+    let isInflight: Bool
+
+    var body: some View {
+        if isConnecting || isInflight {
+            ProgressView()
+                .controlSize(.small)
+                .help(isConnecting ? "Connecting…" : "Capturing hierarchy…")
         }
     }
 }
@@ -79,20 +103,47 @@ private struct LiveToolbarControl: View {
                 }
             }
         } label: {
-            Label(
-                model.isLiveMode ? "Pause Live" : "Live",
-                systemImage: model.isLiveMode ? "pause.circle.fill" : "play.circle"
-            )
+            HStack(spacing: 4) {
+                Image(systemName: model.isLiveMode ? "pause.circle.fill" : "play.circle")
+                Text(model.isLiveMode ? "Pause Live" : "Live")
+                if let badge = transportBadge {
+                    Text(badge)
+                        .font(.caption2.monospaced())
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.secondary.opacity(0.15))
+                        )
+                }
+            }
         } primaryAction: {
             model.toggleLiveMode()
         }
         .disabled(!model.isConnected)
         .keyboardShortcut("l", modifiers: .command)
-        .help(
-            model.isLiveMode
-                ? "Auto-refreshing every \(String(format: "%.1f", model.liveInterval))s — click to pause"
-                : "Start auto-refreshing the hierarchy"
-        )
+        .help(helpText)
+    }
+
+    private var transportBadge: String? {
+        switch model.liveTransport {
+        case .push: return "push"
+        case .poll: return "poll"
+        case .none: return nil
+        }
+    }
+
+    private var helpText: String {
+        guard model.isLiveMode else {
+            return "Start auto-refreshing the hierarchy"
+        }
+        let transport: String
+        switch model.liveTransport {
+        case .push: transport = " via server push"
+        case .poll: transport = " via client polling"
+        case .none: transport = ""
+        }
+        return "Auto-refreshing every \(String(format: "%.1f", model.liveInterval))s\(transport) — click to pause"
     }
 }
 
@@ -163,15 +214,24 @@ private struct DevicePickerBar: View {
                 .labelsHidden()
             }
             HStack(spacing: 4) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
+                statusIndicator
                 Text(model.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Spacer()
+                Spacer(minLength: 4)
+                if model.isLiveMode, let badge = transportBadge {
+                    Text(badge)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.secondary.opacity(0.15))
+                        )
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -193,10 +253,34 @@ private struct DevicePickerBar: View {
         )
     }
 
+    @ViewBuilder
+    private var statusIndicator: some View {
+        if model.isConnecting {
+            ProgressView()
+                .controlSize(.mini)
+                .scaleEffect(0.7)
+                .frame(width: 10, height: 10)
+        } else {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+        }
+    }
+
     private var statusColor: Color {
         if model.isConnected { return .green }
-        if model.status.hasPrefix("connecting") { return .orange }
+        if model.status.hasPrefix("error") || model.status.hasPrefix("failed") {
+            return .red
+        }
         return .secondary
+    }
+
+    private var transportBadge: String? {
+        switch model.liveTransport {
+        case .push: return "push"
+        case .poll: return "poll"
+        case .none: return nil
+        }
     }
 }
 

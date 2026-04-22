@@ -6,6 +6,16 @@ import os.log
 
 private let logger = Logger(subsystem: "swift-inspector", category: "model")
 
+/// How live mode is currently being driven. `.push` means the server is
+/// streaming updates (v3+ subscription), `.poll` means the client is
+/// requesting snapshots on a timer. Surfaced in the UI so the user can
+/// tell whether they're relying on device cooperation or local cadence.
+enum LiveTransport: Equatable {
+    case none
+    case push
+    case poll
+}
+
 @MainActor
 final class InspectAppModel: ObservableObject {
     @Published var discovered: [InspectEndpoint] = []
@@ -24,9 +34,20 @@ final class InspectAppModel: ObservableObject {
     @Published var hierarchyFilter = HierarchyFilter()
     @Published var status: String = "idle"
     @Published var isConnected: Bool = false
+    /// True between the moment `connect(to:)` is called and the TCP
+    /// connection reaches `.ready`. Drives the "connecting…" spinner so
+    /// users can tell a click was registered.
+    @Published var isConnecting: Bool = false
     @Published var connectedDeviceName: String = ""
     @Published var isLiveMode: Bool = false
     @Published var liveInterval: TimeInterval = 1.0
+    /// Transport currently backing live mode. Never `.poll` or `.push`
+    /// while `isLiveMode` is false.
+    @Published var liveTransport: LiveTransport = .none
+    /// True while a `requestHierarchy` has been sent but the response hasn't
+    /// arrived yet. Surfaced to the UI so the toolbar can show a spinner —
+    /// previously private, now published for that purpose.
+    @Published private(set) var isInflight: Bool = false
 
     private let browser = InspectBrowser()
     private var client: InspectClient?
@@ -40,15 +61,16 @@ final class InspectAppModel: ObservableObject {
     /// so we can send a matching `unsubscribeUpdates` on live-off / disconnect.
     private var isSubscribed: Bool = false
     private var liveTimer: Timer?
-    /// True while a `requestHierarchy` has been sent but the response hasn't
-    /// arrived yet. Live mode ticks that arrive during this window are dropped
-    /// to avoid queueing up redundant captures on the device.
-    private var isInflight: Bool = false
     /// Wall-clock time of the last `requestHierarchy` send. If a response
     /// never arrives (dropped connection, device paused in debugger) we
     /// don't want `isInflight` to latch forever and stall live mode.
     private var inflightSentAt: Date?
     private static let inflightTimeout: TimeInterval = 5.0
+    /// Upper bound on how long `isConnecting` may stay true without either
+    /// `onConnected` or `onDisconnected` firing. NWConnection can sit in
+    /// `.waiting` indefinitely on flaky networks, which would otherwise
+    /// latch the "Connecting…" spinner forever.
+    private static let connectingTimeout: TimeInterval = 10.0
 
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
@@ -120,6 +142,7 @@ final class InspectAppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.isConnected = true
+                self.isConnecting = false
                 self.connectedEndpointID = endpoint.id
                 self.markConnected(endpointID: endpoint.id)
                 self.requestHierarchy()
@@ -129,6 +152,14 @@ final class InspectAppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.isConnected = false
+                self.isConnecting = false
+                self.isInflight = false
+                self.inflightSentAt = nil
+                self.isLiveMode = false
+                self.stopLiveTimer()
+                self.isSubscribed = false
+                self.liveTransport = .none
+                self.serverProtocolVersion = nil
                 self.connectedEndpointID = nil
                 self.markConnected(endpointID: nil)
             }
@@ -136,20 +167,35 @@ final class InspectAppModel: ObservableObject {
         client.onMessage = { [weak self] message in
             Task { @MainActor in self?.handle(message) }
         }
+        isConnecting = true
         client.connect(to: endpoint.endpoint)
         self.client = client
         status = "connecting to \(endpoint.name)"
+        scheduleConnectingAutoClear(for: client)
     }
 
     func disconnect() {
+        // Detach callbacks on the old client before cancelling its
+        // NWConnection. Otherwise a late `.cancelled` state transition
+        // from the dying connection would dispatch an async Task that
+        // clobbers the NEXT connection's state (e.g. the user rapidly
+        // switching devices would see the new spinner disappear mid-
+        // connect).
+        client?.onStatus = nil
+        client?.onConnected = nil
+        client?.onDisconnected = nil
+        client?.onMessage = nil
+
         stopLiveTimer()
         if isSubscribed {
             client?.send(.unsubscribeUpdates)
             isSubscribed = false
         }
         isLiveMode = false
+        liveTransport = .none
         isInflight = false
         inflightSentAt = nil
+        isConnecting = false
         serverProtocolVersion = nil
         client?.send(.highlightView(ident: nil))
         client?.disconnect()
@@ -171,9 +217,41 @@ final class InspectAppModel: ObservableObject {
             logger.debug("Skipping requestHierarchy: previous response still in-flight")
             return
         }
+        let sentAt = Date()
         isInflight = true
-        inflightSentAt = Date()
+        inflightSentAt = sentAt
         client?.send(lite ? .requestHierarchyLite : .requestHierarchy)
+        scheduleInflightAutoClear(for: sentAt)
+    }
+
+    /// Clears `isConnecting` if the specified client is still the active one
+    /// after the timeout. Capturing the client identity prevents a rapid
+    /// reconnect from being tripped by the previous attempt's timeout.
+    private func scheduleConnectingAutoClear(for client: InspectClient) {
+        let deadlineNs = UInt64(Self.connectingTimeout * 1_000_000_000)
+        Task { @MainActor [weak self, weak client] in
+            try? await Task.sleep(nanoseconds: deadlineNs)
+            guard let self, let client, self.client === client else { return }
+            if self.isConnecting {
+                self.isConnecting = false
+            }
+        }
+    }
+
+    /// Clears `isInflight` if the matching request is still outstanding after
+    /// the timeout window. Without this, a lost response would leave the
+    /// toolbar spinner running forever — the user would see it and assume
+    /// the app is hung.
+    private func scheduleInflightAutoClear(for sentAt: Date) {
+        let deadlineNs = UInt64((Self.inflightTimeout + 0.1) * 1_000_000_000)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: deadlineNs)
+            guard let self else { return }
+            if self.isInflight, self.inflightSentAt == sentAt {
+                self.isInflight = false
+                self.inflightSentAt = nil
+            }
+        }
     }
 
     func toggleLiveMode() {
@@ -194,8 +272,10 @@ final class InspectAppModel: ObservableObject {
         if let version = serverProtocolVersion,
            version >= InspectProtocol.subscribeUpdatesMinVersion {
             sendSubscribe()
+            liveTransport = .push
         } else {
             startLiveTimer()
+            liveTransport = .poll
         }
     }
 
@@ -205,6 +285,7 @@ final class InspectAppModel: ObservableObject {
             client?.send(.unsubscribeUpdates)
             isSubscribed = false
         }
+        liveTransport = .none
     }
 
     private func sendSubscribe() {
