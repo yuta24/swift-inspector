@@ -32,6 +32,13 @@ final class InspectAppModel: ObservableObject {
     private var client: InspectClient?
     private var connectedEndpointID: InspectEndpoint.ID?
     private var highlightCancellable: AnyCancellable?
+    /// Protocol version advertised by the peer's handshake. Nil until handshake
+    /// arrives. Used to decide whether live mode can use push subscription
+    /// (v3+) or must fall back to client-side polling.
+    private var serverProtocolVersion: Int?
+    /// True when we've told the server to push updates (protocol v3+). Used
+    /// so we can send a matching `unsubscribeUpdates` on live-off / disconnect.
+    private var isSubscribed: Bool = false
     private var liveTimer: Timer?
     /// True while a `requestHierarchy` has been sent but the response hasn't
     /// arrived yet. Live mode ticks that arrive during this window are dropped
@@ -136,9 +143,14 @@ final class InspectAppModel: ObservableObject {
 
     func disconnect() {
         stopLiveTimer()
+        if isSubscribed {
+            client?.send(.unsubscribeUpdates)
+            isSubscribed = false
+        }
         isLiveMode = false
         isInflight = false
         inflightSentAt = nil
+        serverProtocolVersion = nil
         client?.send(.highlightView(ident: nil))
         client?.disconnect()
         client = nil
@@ -167,10 +179,38 @@ final class InspectAppModel: ObservableObject {
     func toggleLiveMode() {
         isLiveMode.toggle()
         if isLiveMode {
-            startLiveTimer()
+            startLive()
         } else {
-            stopLiveTimer()
+            stopLive()
         }
+    }
+
+    /// Starts live updates using the best mechanism the connected server
+    /// supports: subscribe-push (v3+) when available, client-side polling
+    /// otherwise. `liveInterval` seeds the minimum update interval on the
+    /// server so the user's presets still act as a rate limit.
+    private func startLive() {
+        guard isConnected else { return }
+        if let version = serverProtocolVersion,
+           version >= InspectProtocol.subscribeUpdatesMinVersion {
+            sendSubscribe()
+        } else {
+            startLiveTimer()
+        }
+    }
+
+    private func stopLive() {
+        stopLiveTimer()
+        if isSubscribed {
+            client?.send(.unsubscribeUpdates)
+            isSubscribed = false
+        }
+    }
+
+    private func sendSubscribe() {
+        let intervalMs = Int((liveInterval * 1000).rounded())
+        client?.send(.subscribeUpdates(intervalMs: intervalMs))
+        isSubscribed = true
     }
 
     private func startLiveTimer() {
@@ -188,7 +228,14 @@ final class InspectAppModel: ObservableObject {
 
     func setLiveInterval(_ interval: TimeInterval) {
         liveInterval = interval
-        if isLiveMode {
+        guard isLiveMode else { return }
+        if isSubscribed {
+            // Re-subscribe with the new interval so the server's rate limit
+            // follows the user's preset.
+            client?.send(.unsubscribeUpdates)
+            isSubscribed = false
+            sendSubscribe()
+        } else {
             startLiveTimer()
         }
     }
@@ -209,9 +256,10 @@ final class InspectAppModel: ObservableObject {
     private func handle(_ message: InspectMessage) {
         switch message {
         case let .handshake(handshake):
-            logger.info("Model received handshake: \(handshake.deviceName, privacy: .public) \(handshake.systemName, privacy: .public) \(handshake.systemVersion, privacy: .public)")
+            logger.info("Model received handshake: \(handshake.deviceName, privacy: .public) \(handshake.systemName, privacy: .public) \(handshake.systemVersion, privacy: .public) protocol=\(handshake.protocolVersion)")
             connectedDeviceName = "\(handshake.deviceName) — \(handshake.systemName) \(handshake.systemVersion)"
             status = "connected: \(handshake.deviceName)"
+            serverProtocolVersion = handshake.protocolVersion
         case let .hierarchy(newRoots):
             let nodeCount = Self.countNodes(in: newRoots)
             logger.info("Model received hierarchy: \(newRoots.count) root(s), \(nodeCount) total node(s)")
@@ -223,7 +271,7 @@ final class InspectAppModel: ObservableObject {
             isInflight = false
             inflightSentAt = nil
             status = "error: \(message)"
-        case .requestHierarchy, .requestHierarchyLite, .highlightView:
+        case .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView:
             break
         }
     }

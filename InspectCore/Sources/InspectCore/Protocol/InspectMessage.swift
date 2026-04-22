@@ -7,6 +7,12 @@ public enum InspectMessage: Codable, Sendable {
     /// capture. Used by live mode: structure + frames update on every tick,
     /// while the last full capture's screenshots are retained client-side.
     case requestHierarchyLite
+    /// Asks the server to start pushing hierarchy snapshots (screenshot-less)
+    /// whenever it detects layout changes, rate-limited to at most one push
+    /// per `intervalMs` milliseconds. Replaces client-side polling for live
+    /// mode in protocol v3+.
+    case subscribeUpdates(intervalMs: Int)
+    case unsubscribeUpdates
     case hierarchy(roots: [ViewNode])
     case highlightView(ident: UUID?)
     case error(String)
@@ -32,6 +38,9 @@ public enum InspectMessage: Codable, Sendable {
 }
 
 public enum InspectProtocol {
-    public static let version: Int = 2
+    public static let version: Int = 3
     public static let bonjourServiceType: String = "_swift-inspector._tcp"
+    /// Earliest server version that understands `subscribeUpdates`. Clients
+    /// fall back to polling when connected to older servers.
+    public static let subscribeUpdatesMinVersion: Int = 3
 }

@@ -17,6 +17,13 @@ public final class InspectListener {
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
 
+    #if DEBUG && canImport(UIKit)
+    /// Subscribers for push-updates mode (protocol v3+). Mutated only on the
+    /// main actor so it stays in sync with the MainActor-isolated monitor.
+    @MainActor private var subscribers: [ObjectIdentifier: NWConnection] = [:]
+    @MainActor private var monitor: HierarchyChangeMonitor?
+    #endif
+
     public init(
         serviceName: String? = nil,
         serializer: MessageSerializer = JSONMessageSerializer()
@@ -67,9 +74,19 @@ public final class InspectListener {
             case let .failed(error):
                 logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
                 self.connections.removeValue(forKey: key)
+                #if DEBUG && canImport(UIKit)
+                Task { @MainActor [weak self] in
+                    self?.removeSubscriber(connection)
+                }
+                #endif
             case .cancelled:
                 logger.info("Connection cancelled")
                 self.connections.removeValue(forKey: key)
+                #if DEBUG && canImport(UIKit)
+                Task { @MainActor [weak self] in
+                    self?.removeSubscriber(connection)
+                }
+                #endif
             default:
                 break
             }
@@ -155,6 +172,23 @@ public final class InspectListener {
                 logger.info("Lite capture: \(roots.count) root(s), \(nodeCount) node(s)")
                 self.send(.hierarchy(roots: roots), on: connection)
             }
+        case .subscribeUpdates(let intervalMs):
+            logger.info("Received subscribeUpdates (intervalMs=\(intervalMs))")
+            #if DEBUG && canImport(UIKit)
+            let clampedInterval = max(0.016, Double(intervalMs) / 1000.0)
+            Task { @MainActor [weak self] in
+                self?.addSubscriber(connection, intervalSec: clampedInterval)
+            }
+            #else
+            send(.error("subscribeUpdates is not supported on this platform"), on: connection)
+            #endif
+        case .unsubscribeUpdates:
+            logger.info("Received unsubscribeUpdates")
+            #if DEBUG && canImport(UIKit)
+            Task { @MainActor [weak self] in
+                self?.removeSubscriber(connection)
+            }
+            #endif
         case .highlightView(let ident):
             logger.info("Received highlightView: \(ident?.uuidString ?? "nil", privacy: .public)")
             Task { @MainActor in
@@ -235,6 +269,42 @@ public final class InspectListener {
         }
         #endif
     }
+
+    #if DEBUG && canImport(UIKit)
+    @MainActor
+    private func addSubscriber(_ connection: NWConnection, intervalSec: TimeInterval) {
+        let key = ObjectIdentifier(connection)
+        let wasEmpty = subscribers.isEmpty
+        subscribers[key] = connection
+        if wasEmpty {
+            let monitor = HierarchyChangeMonitor()
+            monitor.start(minIntervalSec: intervalSec) { [weak self] in
+                self?.pushHierarchyToSubscribers()
+            }
+            self.monitor = monitor
+        }
+    }
+
+    @MainActor
+    private func removeSubscriber(_ connection: NWConnection) {
+        let key = ObjectIdentifier(connection)
+        guard subscribers.removeValue(forKey: key) != nil else { return }
+        if subscribers.isEmpty {
+            monitor?.stop()
+            monitor = nil
+        }
+    }
+
+    @MainActor
+    private func pushHierarchyToSubscribers() {
+        guard !subscribers.isEmpty else { return }
+        let roots = HierarchyScanner.captureAllWindows(captureScreenshots: false)
+        let message = InspectMessage.hierarchy(roots: roots)
+        for connection in subscribers.values {
+            self.send(message, on: connection)
+        }
+    }
+    #endif
 
     @MainActor
     private static func captureRoots(captureScreenshots: Bool) -> [ViewNode] {
