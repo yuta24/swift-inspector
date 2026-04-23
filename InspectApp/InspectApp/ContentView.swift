@@ -187,7 +187,8 @@ private struct SidebarView: View {
             HierarchyTreeView(
                 roots: model.roots,
                 selection: $model.selectedNodeID,
-                filter: $model.hierarchyFilter
+                filter: $model.hierarchyFilter,
+                expandedPaths: $model.expandedPaths
             )
         }
     }
@@ -423,6 +424,9 @@ private struct InspectorView: View {
                             .font(.caption2.monospaced())
                             .foregroundStyle(.tertiary)
                             .textSelection(.enabled)
+                    }
+                    .contextMenu {
+                        NodeCopyMenu(node: node)
                     }
 
                     ScreenshotSection(node: node)

@@ -56,6 +56,11 @@ final class InspectAppModel: ObservableObject {
     /// connect is initiated or the user changes the staged selection. Drives
     /// the Retry action in the sidebar.
     @Published var connectionError: String?
+    /// Stable paths of tree rows the user has expanded. Set membership, not
+    /// UUID-keyed, so the expansion survives captures that regenerate every
+    /// node's `ident`. Entries that no longer match any node in the current
+    /// tree are harmless — they just don't resolve.
+    @Published var expandedPaths: Set<String> = []
 
     private let browser = InspectBrowser()
     private var client: InspectClient?
@@ -235,6 +240,7 @@ final class InspectAppModel: ObservableObject {
         selectedNodeID = nil
         measurementReferenceID = nil
         measurementHoverID = nil
+        expandedPaths = []
     }
 
     func shutdown() {

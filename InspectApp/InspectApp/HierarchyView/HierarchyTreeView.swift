@@ -5,18 +5,26 @@ struct HierarchyTreeView: View {
     let roots: [ViewNode]
     @Binding var selection: UUID?
     @Binding var filter: HierarchyFilter
+    @Binding var expandedPaths: Set<String>
 
     var body: some View {
         VStack(spacing: 0) {
             List(selection: $selection) {
-                ForEach(roots) { root in
+                ForEach(Array(roots.enumerated()), id: \.element.id) { index, root in
+                    let rootPath = [root.stablePathSegment(siblingIndex: index)]
                     if filter.isEmpty {
-                        OutlineGroup(root, children: \.optionalChildren) { node in
-                            HierarchyNodeRow(node: node, filter: filter)
-                                .tag(node.id)
-                        }
+                        PersistentOutlineNode(
+                            node: root,
+                            path: rootPath,
+                            expandedPaths: $expandedPaths,
+                            filter: filter
+                        )
                     } else {
-                        FilteredOutlineGroup(root: root, filter: filter)
+                        FilteredOutlineGroup(
+                            root: root,
+                            path: rootPath,
+                            filter: filter
+                        )
                     }
                 }
             }
@@ -42,32 +50,105 @@ struct HierarchyTreeView: View {
     }
 }
 
+// MARK: - Persistent Outline Node
+//
+// Manual DisclosureGroup recursion backed by a stable-path-keyed `Set`, so
+// the expanded/collapsed state survives live-mode captures that regenerate
+// every node's `ident`. Replaces `OutlineGroup`, whose internal state is
+// keyed by identity and therefore collapses on every refresh.
+
+private struct PersistentOutlineNode: View {
+    let node: ViewNode
+    let path: [String]
+    @Binding var expandedPaths: Set<String>
+    let filter: HierarchyFilter
+
+    var body: some View {
+        let pathKey = path.joined(separator: "/")
+        if node.children.isEmpty {
+            HierarchyNodeRow(node: node, filter: filter, stablePath: pathKey)
+                .tag(node.id)
+        } else {
+            DisclosureGroup(isExpanded: expandedBinding(for: pathKey)) {
+                ForEach(Array(node.children.enumerated()), id: \.element.id) { index, child in
+                    PersistentOutlineNode(
+                        node: child,
+                        path: path + [child.stablePathSegment(siblingIndex: index)],
+                        expandedPaths: $expandedPaths,
+                        filter: filter
+                    )
+                }
+            } label: {
+                HierarchyNodeRow(node: node, filter: filter, stablePath: pathKey)
+                    .tag(node.id)
+            }
+        }
+    }
+
+    private func expandedBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedPaths.contains(key) },
+            set: { newValue in
+                if newValue {
+                    expandedPaths.insert(key)
+                } else {
+                    expandedPaths.remove(key)
+                }
+            }
+        )
+    }
+}
+
 // MARK: - Filtered Outline Group
 //
 // Xcode View Debugger style filtering:
 //   - Branches with no matching descendants are pruned (hidden entirely)
 //   - Non-matching ancestor nodes are shown but dimmed
 //   - Matching nodes are highlighted
+//
+// Filter mode deliberately uses DisclosureGroup's built-in expansion
+// (not the stable-path Set) because the set of visible branches is already
+// determined by matching — persisted expansion from the unfiltered view
+// would fight the filter logic.
 
 private struct FilteredOutlineGroup: View {
     let root: ViewNode
+    let path: [String]
     let filter: HierarchyFilter
 
     var body: some View {
         if filter.subtreeContainsMatch(root) {
-            let filteredChildren = root.children.filter { filter.subtreeContainsMatch($0) }
+            let pathKey = path.joined(separator: "/")
+            let indexedChildren = Array(root.children.enumerated())
+            let filteredChildren = indexedChildren.filter { _, child in
+                filter.subtreeContainsMatch(child)
+            }
             let isDimmed = !filter.matches(root)
             if filteredChildren.isEmpty {
-                HierarchyNodeRow(node: root, filter: filter, isDimmed: isDimmed)
-                    .tag(root.id)
+                HierarchyNodeRow(
+                    node: root,
+                    filter: filter,
+                    isDimmed: isDimmed,
+                    stablePath: pathKey
+                )
+                .tag(root.id)
             } else {
                 DisclosureGroup {
-                    ForEach(filteredChildren) { child in
-                        FilteredOutlineGroup(root: child, filter: filter)
+                    ForEach(filteredChildren, id: \.element.id) { index, child in
+                        FilteredOutlineGroup(
+                            root: child,
+                            path: path + [child.stablePathSegment(siblingIndex: index)],
+                            filter: filter
+                        )
                     }
                 } label: {
-                    HierarchyNodeRow(node: root, filter: filter, isDimmed: isDimmed)
-                        .tag(root.id)
+                    HierarchyNodeRow(
+                        node: root,
+                        filter: filter,
+                        isDimmed: isDimmed,
+                        stablePath: pathKey
+                    )
+                    .tag(root.id)
                 }
             }
         }
@@ -178,11 +259,5 @@ private struct FilterToggle: View {
         }
         .buttonStyle(.plain)
         .help(title)
-    }
-}
-
-private extension ViewNode {
-    var optionalChildren: [ViewNode]? {
-        children.isEmpty ? nil : children
     }
 }
