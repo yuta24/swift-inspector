@@ -215,4 +215,81 @@ final class ViewNodeTests: XCTestCase {
         let header = framed.prefix(Framing.headerSize)
         XCTAssertEqual(Framing.parseLength(header), payload.count)
     }
+
+    func testTypographyRoundtrip() throws {
+        let typography = Typography(
+            fontName: "SFUI-Semibold",
+            familyName: "SF UI",
+            pointSize: 17,
+            weight: 0.3,
+            weightName: "semibold",
+            isBold: false,
+            isItalic: false,
+            textColor: RGBAColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1),
+            alignment: "center",
+            numberOfLines: 2,
+            lineHeight: 20.5,
+            ascender: 16.0,
+            descender: -4.0
+        )
+        let node = ViewNode(
+            className: "UILabel",
+            frame: CGRect(x: 0, y: 0, width: 100, height: 20),
+            typography: typography
+        )
+        let serializer = JSONMessageSerializer()
+        let data = try serializer.encode(.hierarchy(roots: [node]))
+        let decoded = try serializer.decode(data)
+        guard case let .hierarchy(roots) = decoded else {
+            XCTFail("expected hierarchy case")
+            return
+        }
+        XCTAssertEqual(roots.first?.typography, typography)
+    }
+
+    func testLegacyDecodeWithoutTypography() throws {
+        // Older servers don't send the `typography` key. Missing should
+        // decode as nil, not fail.
+        let node = ViewNode(
+            className: "UILabel",
+            frame: CGRect(x: 0, y: 0, width: 100, height: 20)
+        )
+        let encoded = try JSONEncoder().encode(node)
+        var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        json.removeValue(forKey: "typography")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try JSONDecoder().decode(ViewNode.self, from: stripped)
+        XCTAssertNil(decoded.typography)
+    }
+
+    func testTypographyNaNSanitization() {
+        let typography = Typography(
+            fontName: "X",
+            pointSize: .nan,
+            weight: .infinity,
+            lineHeight: -.infinity,
+            ascender: .nan,
+            descender: .nan
+        )
+        XCTAssertEqual(typography.pointSize, 0)
+        XCTAssertEqual(typography.weight, 0)
+        XCTAssertEqual(typography.lineHeight, 0)
+        XCTAssertEqual(typography.ascender, 0)
+        XCTAssertEqual(typography.descender, 0)
+    }
+
+    func testRGBAColorHexFormats() {
+        let opaque = RGBAColor(red: 1, green: 0.5, blue: 0, alpha: 1)
+        XCTAssertEqual(opaque.hexRGB, "#FF8000")
+        XCTAssertEqual(opaque.hexRGBA, "#FF8000FF")
+
+        let translucent = RGBAColor(red: 0, green: 0, blue: 0, alpha: 0.5)
+        XCTAssertEqual(translucent.hexRGB, "#000000")
+        XCTAssertEqual(translucent.hexRGBA, "#00000080")
+
+        // Wide-gamut channel (>1) clamps rather than overflowing the byte.
+        let wide = RGBAColor(red: 1.2, green: 0, blue: 0, alpha: 1)
+        XCTAssertEqual(wide.hexRGB, "#FF0000")
+    }
 }

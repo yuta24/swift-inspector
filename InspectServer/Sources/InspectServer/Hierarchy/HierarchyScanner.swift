@@ -100,6 +100,8 @@ public enum HierarchyScanner {
 
         let properties = Self.extractProperties(from: view)
 
+        let typography = Self.extractTypography(from: view)
+
         let constraints = Self.extractConstraints(from: view)
 
         // Absolute AABB in window coordinates — used for culling and as a
@@ -137,6 +139,7 @@ public enum HierarchyScanner {
             isUserInteractionEnabled: view.isUserInteractionEnabled,
             isEnabled: isEnabled,
             properties: properties,
+            typography: typography,
             constraints: constraints,
             screenshot: groupScreenshot,
             soloScreenshot: soloScreenshot,
@@ -190,6 +193,8 @@ public enum HierarchyScanner {
 
         let properties = Self.extractLayerProperties(from: layer)
 
+        let typography = Self.extractTypography(fromLayer: layer)
+
         let nodeIdent = UUID()
 
         // Absolute AABB in window coordinates (for culling / fallback).
@@ -224,6 +229,7 @@ public enum HierarchyScanner {
             isUserInteractionEnabled: false,
             isEnabled: nil,
             properties: properties,
+            typography: typography,
             screenshot: groupScreenshot,
             soloScreenshot: soloScreenshot,
             children: children
@@ -240,10 +246,7 @@ public enum HierarchyScanner {
             } else if let attr = textLayer.string as? NSAttributedString {
                 props["text"] = attr.string
             }
-            props["fontSize"] = String(format: "%g", textLayer.fontSize)
-            if let fg = textLayer.foregroundColor {
-                props["foregroundColor"] = describeColor(UIColor(cgColor: fg))
-            }
+            // font / color captured in the structured Typography field
         }
 
         if let shapeLayer = layer as? CAShapeLayer {
@@ -369,16 +372,17 @@ public enum HierarchyScanner {
     }
 
     // MARK: - Type-specific property extraction
+    //
+    // Font / text color / alignment / numberOfLines are intentionally NOT
+    // recorded here — they live on the structured `Typography` field instead
+    // so the client can render them as a proper typography section rather
+    // than a key/value string grid.
 
     private static func extractProperties(from view: UIView) -> [String: String] {
         var props: [String: String] = [:]
 
         if let label = view as? UILabel {
             if let text = label.text { props["text"] = text }
-            props["font"] = "\(label.font.fontName) \(label.font.pointSize)"
-            if let textColor = label.textColor { props["textColor"] = describeColor(textColor) }
-            props["numberOfLines"] = "\(label.numberOfLines)"
-            props["textAlignment"] = describeTextAlignment(label.textAlignment)
             props["lineBreakMode"] = describeLineBreakMode(label.lineBreakMode)
         }
 
@@ -392,25 +396,16 @@ public enum HierarchyScanner {
 
         if let button = view as? UIButton {
             if let title = button.currentTitle { props["title"] = title }
-            props["titleColor"] = describeColor(button.currentTitleColor)
-            if let titleFont = button.titleLabel?.font {
-                props["titleFont"] = "\(titleFont.fontName) \(titleFont.pointSize)"
-            }
             props["isSelected"] = "\(button.isSelected)"
         }
 
         if let textField = view as? UITextField {
             if let text = textField.text, !text.isEmpty { props["text"] = text }
             if let placeholder = textField.placeholder { props["placeholder"] = placeholder }
-            if let font = textField.font { props["font"] = "\(font.fontName) \(font.pointSize)" }
-            if let textColor = textField.textColor { props["textColor"] = describeColor(textColor) }
-            props["textAlignment"] = describeTextAlignment(textField.textAlignment)
         }
 
         if let textView = view as? UITextView {
             if let text = textView.text, !text.isEmpty { props["text"] = text }
-            if let font = textView.font { props["font"] = "\(font.fontName) \(font.pointSize)" }
-            if let textColor = textView.textColor { props["textColor"] = describeColor(textColor) }
             props["isEditable"] = "\(textView.isEditable)"
             props["isSelectable"] = "\(textView.isSelectable)"
         }
@@ -488,6 +483,164 @@ public enum HierarchyScanner {
         case .equalSpacing: return "equalSpacing"
         case .equalCentering: return "equalCentering"
         @unknown default: return "unknown"
+        }
+    }
+
+    // MARK: - Typography extraction
+
+    /// Builds a `Typography` payload from the text-bearing view types we
+    /// recognise. Returns nil for views that don't carry typography so the
+    /// client's "Typography" section stays hidden on structural views.
+    private static func extractTypography(from view: UIView) -> Typography? {
+        if let label = view as? UILabel {
+            return makeTypography(
+                font: label.font,
+                color: label.textColor,
+                alignment: label.textAlignment,
+                numberOfLines: label.numberOfLines
+            )
+        }
+        if let button = view as? UIButton {
+            guard let font = button.titleLabel?.font else { return nil }
+            return makeTypography(
+                font: font,
+                color: button.currentTitleColor,
+                alignment: button.titleLabel?.textAlignment,
+                numberOfLines: button.titleLabel?.numberOfLines
+            )
+        }
+        if let textField = view as? UITextField {
+            guard let font = textField.font else { return nil }
+            return makeTypography(
+                font: font,
+                color: textField.textColor,
+                alignment: textField.textAlignment,
+                numberOfLines: nil
+            )
+        }
+        if let textView = view as? UITextView {
+            guard let font = textView.font else { return nil }
+            return makeTypography(
+                font: font,
+                color: textView.textColor,
+                alignment: textView.textAlignment,
+                numberOfLines: nil
+            )
+        }
+        return nil
+    }
+
+    /// CATextLayer has its own font/size/color API that doesn't go through
+    /// UIFont, so it needs a dedicated builder.
+    private static func extractTypography(fromLayer layer: CALayer) -> Typography? {
+        guard let textLayer = layer as? CATextLayer else { return nil }
+        let pointSize = Double(textLayer.fontSize)
+        let (name, family): (String, String?) = {
+            if let font = textLayer.font as? UIFont {
+                return (font.fontName, font.familyName)
+            }
+            if let ctFont = textLayer.font {
+                // CFTypeRef branch — CATextLayer.font can also be
+                // CTFontRef / CGFontRef / String depending on how it was set.
+                let typeID = CFGetTypeID(ctFont as CFTypeRef)
+                if typeID == CTFontGetTypeID() {
+                    let ct = ctFont as! CTFont
+                    return (CTFontCopyPostScriptName(ct) as String,
+                            CTFontCopyFamilyName(ct) as String)
+                }
+                if typeID == CGFont.typeID {
+                    let cg = ctFont as! CGFont
+                    return ((cg.postScriptName as String?) ?? "CGFont", nil)
+                }
+                if let name = ctFont as? String {
+                    return (name, nil)
+                }
+            }
+            return ("Helvetica", nil)
+        }()
+        let color = textLayer.foregroundColor.flatMap { UIColor(cgColor: $0) }
+        return Typography(
+            fontName: name,
+            familyName: family,
+            pointSize: pointSize,
+            weight: nil,
+            weightName: nil,
+            isBold: false,
+            isItalic: false,
+            textColor: color.flatMap(RGBAColor.init(uiColor:)),
+            alignment: describeCATextAlignment(textLayer.alignmentMode),
+            numberOfLines: nil,
+            lineHeight: nil,
+            ascender: nil,
+            descender: nil
+        )
+    }
+
+    private static func makeTypography(
+        font: UIFont,
+        color: UIColor?,
+        alignment: NSTextAlignment?,
+        numberOfLines: Int?
+    ) -> Typography {
+        let traits = font.fontDescriptor.symbolicTraits
+        let weightValue = fontWeightValue(for: font)
+        return Typography(
+            fontName: font.fontName,
+            familyName: font.familyName,
+            pointSize: Double(font.pointSize),
+            weight: weightValue,
+            weightName: weightValue.flatMap(weightName(for:)),
+            isBold: traits.contains(.traitBold),
+            isItalic: traits.contains(.traitItalic),
+            textColor: color.flatMap(RGBAColor.init(uiColor:)),
+            alignment: alignment.map(describeTextAlignment),
+            numberOfLines: numberOfLines,
+            lineHeight: Double(font.lineHeight),
+            ascender: Double(font.ascender),
+            descender: Double(font.descender)
+        )
+    }
+
+    /// Extracts the `UIFont.Weight` raw value from the font descriptor's
+    /// traits dictionary. Returns nil for fonts without a standard weight
+    /// trait (rare; happens for some custom fonts).
+    private static func fontWeightValue(for font: UIFont) -> Double? {
+        let traits = font.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
+        guard let number = traits?[.weight] as? NSNumber else { return nil }
+        return number.doubleValue
+    }
+
+    private static let weightAnchors: [(Double, String)] = [
+        (UIFont.Weight.ultraLight.rawValue, "ultraLight"),
+        (UIFont.Weight.thin.rawValue, "thin"),
+        (UIFont.Weight.light.rawValue, "light"),
+        (UIFont.Weight.regular.rawValue, "regular"),
+        (UIFont.Weight.medium.rawValue, "medium"),
+        (UIFont.Weight.semibold.rawValue, "semibold"),
+        (UIFont.Weight.bold.rawValue, "bold"),
+        (UIFont.Weight.heavy.rawValue, "heavy"),
+        (UIFont.Weight.black.rawValue, "black"),
+    ]
+
+    /// Maps a raw weight value to a human-readable name. Uses the standard
+    /// UIFont.Weight anchor values with a tolerance so slight variations
+    /// still snap to the nearest named weight.
+    private static func weightName(for value: Double) -> String? {
+        let closest = weightAnchors.min { abs($0.0 - value) < abs($1.0 - value) }
+        if let closest, abs(closest.0 - value) < 0.05 {
+            return closest.1
+        }
+        return nil
+    }
+
+    private static func describeCATextAlignment(_ mode: CATextLayerAlignmentMode) -> String {
+        switch mode {
+        case .left: return "left"
+        case .right: return "right"
+        case .center: return "center"
+        case .justified: return "justified"
+        case .natural: return "natural"
+        default: return "natural"
         }
     }
 }

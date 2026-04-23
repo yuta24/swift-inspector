@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import InspectCore
 
 struct ContentView: View {
@@ -438,6 +439,9 @@ private struct InspectorView: View {
                         measurementReferenceID: $measurementReferenceID,
                         onNavigate: { id in selectedNodeID = id }
                     )
+                    if let typography = node.typography {
+                        TypographySection(typography: typography)
+                    }
                     AppearanceSection(node: node)
                     LayerSection(node: node)
                     InteractionSection(node: node)
@@ -488,13 +492,29 @@ private struct ScreenshotSection: View {
                             .frame(height: 60)
                     }
 
-                    if node.soloScreenshot != nil && node.screenshot != nil {
-                        Picker("", selection: $showSolo) {
-                            Text("Group").tag(false)
-                            Text("Solo").tag(true)
+                    HStack(spacing: 8) {
+                        if node.soloScreenshot != nil && node.screenshot != nil {
+                            Picker("", selection: $showSolo) {
+                                Text("Group").tag(false)
+                                Text("Solo").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
                         }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
+                        Spacer(minLength: 0)
+                        if let data {
+                            Button {
+                                ScreenshotExport.save(
+                                    data: data,
+                                    className: node.className,
+                                    variant: showSolo ? "solo" : "group"
+                                )
+                            } label: {
+                                Label("Save PNG", systemImage: "square.and.arrow.down")
+                            }
+                            .controlSize(.small)
+                            .help("Save this screenshot as a PNG")
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -502,6 +522,39 @@ private struct ScreenshotSection: View {
             } label: {
                 SectionHeader("Screenshot", icon: "camera.viewfinder")
             }
+        }
+    }
+}
+
+// MARK: - Screenshot Export
+
+/// Writes an encoded screenshot (JPEG for group, PNG for solo) to disk as a
+/// lossless PNG via `NSSavePanel`. Re-encodes through `NSBitmapImageRep` so
+/// the file on disk is always PNG regardless of the source format.
+private enum ScreenshotExport {
+    static func save(data: Data, className: String, variant: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(className)-\(variant).png"
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let pngData: Data? = {
+            guard let image = NSImage(data: data),
+                  let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff) else {
+                return nil
+            }
+            return rep.representation(using: .png, properties: [:])
+        }()
+
+        if let pngData {
+            try? pngData.write(to: url)
+        } else {
+            // Fall back to the raw bytes so the user always gets a file, even
+            // if re-encoding fails for some reason.
+            try? data.write(to: url)
         }
     }
 }
@@ -561,14 +614,7 @@ private struct AppearanceSection: View {
                 HStack(spacing: 8) {
                     PropertyLabel("backgroundColor")
                     if let color = node.backgroundColor {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(color.swiftUIColor)
-                            .frame(width: 14, height: 14)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .stroke(.quaternary, lineWidth: 0.5)
-                            )
-                        PropertyValue(colorString(color))
+                        ColorSwatch(color: color)
                     } else {
                         PropertyValue("nil")
                     }
@@ -585,13 +631,6 @@ private struct AppearanceSection: View {
         } label: {
             SectionHeader("Appearance", icon: "paintbrush")
         }
-    }
-
-    private func colorString(_ color: RGBAColor) -> String {
-        String(
-            format: "rgba(%.2f, %.2f, %.2f, %.2f)",
-            color.red, color.green, color.blue, color.alpha
-        )
     }
 }
 
@@ -643,17 +682,7 @@ private struct LayerSection: View {
                     if let color = node.borderColor {
                         HStack(spacing: 8) {
                             PropertyLabel("borderColor")
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(color.swiftUIColor)
-                                .frame(width: 14, height: 14)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .stroke(.quaternary, lineWidth: 0.5)
-                                )
-                            PropertyValue(String(
-                                format: "rgba(%.2f, %.2f, %.2f, %.2f)",
-                                color.red, color.green, color.blue, color.alpha
-                            ))
+                            ColorSwatch(color: color)
                         }
                     }
                 }
@@ -1064,6 +1093,171 @@ private struct ChildrenSection: View {
         } label: {
             SectionHeader("Children", icon: "rectangle.3.group")
         }
+    }
+}
+
+// MARK: - Typography Section
+
+private struct TypographySection: View {
+    let typography: Typography
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                fontRow
+                metricsGrid
+                if let color = typography.textColor {
+                    HStack(spacing: 8) {
+                        PropertyLabel("textColor")
+                        ColorSwatch(color: color)
+                    }
+                }
+                if let alignment = typography.alignment {
+                    HStack(spacing: 8) {
+                        PropertyLabel("alignment")
+                        PropertyValue(alignment)
+                    }
+                }
+                if let lines = typography.numberOfLines {
+                    HStack(spacing: 8) {
+                        PropertyLabel("numberOfLines")
+                        PropertyValue(lines == 0 ? "0 (unlimited)" : "\(lines)")
+                    }
+                }
+                if typography.isBold || typography.isItalic {
+                    HStack(spacing: 4) {
+                        if typography.isBold { traitBadge("Bold", italic: false) }
+                        if typography.isItalic { traitBadge("Italic", italic: true) }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        } label: {
+            SectionHeader("Typography", icon: "textformat")
+        }
+    }
+
+    private var fontRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            PropertyLabel("font")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(typography.fontName)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        Button("Copy Font Name") {
+                            copyToPasteboard(typography.fontName)
+                        }
+                        if let family = typography.familyName {
+                            Button("Copy Family Name") {
+                                copyToPasteboard(family)
+                            }
+                        }
+                    }
+                if let family = typography.familyName, family != typography.fontName {
+                    Text(family)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var metricsGrid: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            GridRow {
+                PropertyLabel("size")
+                PropertyValue("\(formatPt(typography.pointSize))")
+                if let name = typography.weightName {
+                    PropertyLabel("weight")
+                    PropertyValue(name)
+                } else if let weight = typography.weight {
+                    PropertyLabel("weight")
+                    PropertyValue(String(format: "%.2f", weight))
+                }
+            }
+            if let lineHeight = typography.lineHeight, lineHeight > 0 {
+                GridRow {
+                    PropertyLabel("lineHeight")
+                    PropertyValue(formatPt(lineHeight))
+                }
+            }
+        }
+    }
+
+    private func traitBadge(_ label: String, italic: Bool) -> some View {
+        Text(label)
+            .font(italic ? .caption2.italic() : .caption2)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.secondary.opacity(0.15))
+            )
+    }
+
+    private func formatPt(_ value: Double) -> String {
+        if value == value.rounded() {
+            return String(format: "%g pt", value)
+        }
+        return String(format: "%.2f pt", value)
+    }
+}
+
+// MARK: - Color Swatch
+
+/// Displays a color as a filled square + a HEX label, with a context menu for
+/// copying the color in several formats. Designers primarily want HEX, so that
+/// is the default displayed form; engineer-focused formats (UIColor / SwiftUI
+/// literals, rgba) are available via right-click.
+private struct ColorSwatch: View {
+    let color: RGBAColor
+
+    var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(color.swiftUIColor)
+                .frame(width: 14, height: 14)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(.quaternary, lineWidth: 0.5)
+                )
+            Text(labelText)
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .help(rgbaString)
+        }
+        .contextMenu {
+            Button("Copy HEX  \(color.hexRGB)") {
+                copyToPasteboard(color.hexRGB)
+            }
+            if color.alpha < 0.999 {
+                Button("Copy HEX + Alpha  \(color.hexRGBA)") {
+                    copyToPasteboard(color.hexRGBA)
+                }
+            }
+            Divider()
+            Button("Copy rgba(…)") { copyToPasteboard(rgbaString) }
+            Button("Copy UIColor(…)") { copyToPasteboard(color.uiColorLiteral) }
+            Button("Copy SwiftUI Color") { copyToPasteboard(color.swiftUIColorLiteral) }
+        }
+    }
+
+    private var labelText: String {
+        if color.alpha < 0.999 {
+            let percent = Int((color.alpha * 100).rounded())
+            return "\(color.hexRGB) · \(percent)%"
+        }
+        return color.hexRGB
+    }
+
+    private var rgbaString: String {
+        String(
+            format: "rgba(%.2f, %.2f, %.2f, %.2f)",
+            color.red, color.green, color.blue, color.alpha
+        )
     }
 }
 

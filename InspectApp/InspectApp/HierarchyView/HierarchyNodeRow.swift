@@ -117,7 +117,9 @@ struct NodeCopyMenu: View {
     }
 }
 
-private func copyToPasteboard(_ text: String) {
+/// Writes a plain-text string to the general pasteboard. Shared across the
+/// Inspector sections and the sidebar's context menus.
+func copyToPasteboard(_ text: String) {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.setString(text, forType: .string)

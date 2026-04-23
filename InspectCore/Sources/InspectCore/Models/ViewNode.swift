@@ -45,6 +45,10 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
     // MARK: Type-specific properties (e.g. UILabel.text, UIButton.title)
     public let properties: [String: String]
 
+    /// Font + text color details for text-bearing views. Nil when the view
+    /// doesn't render text or the server pre-dates typography capture.
+    public let typography: Typography?
+
     /// Auto Layout constraints owned by this view. Empty for nodes whose
     /// server pre-dates constraint capture. Client must treat an empty array
     /// as "no data", not "explicitly no constraints".
@@ -79,6 +83,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         isUserInteractionEnabled: Bool = true,
         isEnabled: Bool? = nil,
         properties: [String: String] = [:],
+        typography: Typography? = nil,
         constraints: [LayoutConstraint] = [],
         screenshot: Data? = nil,
         soloScreenshot: Data? = nil,
@@ -104,6 +109,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         self.isUserInteractionEnabled = isUserInteractionEnabled
         self.isEnabled = isEnabled
         self.properties = properties
+        self.typography = typography
         self.constraints = constraints
         self.screenshot = screenshot
         self.soloScreenshot = soloScreenshot
@@ -119,7 +125,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         case backgroundColor, accessibilityIdentifier, accessibilityLabel
         case clipsToBounds, cornerRadius, borderWidth, borderColor
         case contentMode, isUserInteractionEnabled, isEnabled
-        case properties, constraints, screenshot, soloScreenshot, children
+        case properties, typography, constraints, screenshot, soloScreenshot, children
     }
 
     public init(from decoder: Decoder) throws {
@@ -144,6 +150,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         let isUserInteractionEnabled = try c.decode(Bool.self, forKey: .isUserInteractionEnabled)
         let isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled)
         let properties = try c.decodeIfPresent([String: String].self, forKey: .properties) ?? [:]
+        let typography = try c.decodeIfPresent(Typography.self, forKey: .typography)
         let constraints = try c.decodeIfPresent([LayoutConstraint].self, forKey: .constraints) ?? []
         let screenshot = try c.decodeIfPresent(Data.self, forKey: .screenshot)
         let soloScreenshot = try c.decodeIfPresent(Data.self, forKey: .soloScreenshot)
@@ -170,6 +177,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             isUserInteractionEnabled: isUserInteractionEnabled,
             isEnabled: isEnabled,
             properties: properties,
+            typography: typography,
             constraints: constraints,
             screenshot: screenshot,
             soloScreenshot: soloScreenshot,
@@ -214,6 +222,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             isUserInteractionEnabled: isUserInteractionEnabled,
             isEnabled: isEnabled,
             properties: properties,
+            typography: typography,
             constraints: constraints,
             screenshot: screenshot,
             soloScreenshot: soloScreenshot,
@@ -243,6 +252,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             isUserInteractionEnabled: isUserInteractionEnabled,
             isEnabled: isEnabled,
             properties: properties,
+            typography: typography,
             constraints: constraints,
             screenshot: screenshot,
             soloScreenshot: soloScreenshot,
