@@ -22,6 +22,11 @@ final class InspectAppModel: ObservableObject {
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
     @Published var selectedNodeID: UUID?
+    /// When set, tree and 3D scene show only this node and its descendants
+    /// instead of the full hierarchy. Cleared on disconnect, or when the
+    /// focused node no longer appears in a fresh capture (live-mode remap
+    /// fails).
+    @Published var focusedNodeID: UUID?
     /// The "reference" node for the distance measurement tool. When this
     /// and `selectedNodeID` are both set and differ, the inspector shows a
     /// `Measurement` section and the 3D scene overlays a line between the
@@ -87,6 +92,36 @@ final class InspectAppModel: ObservableObject {
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
         return Self.findNode(id: id, in: roots)
+    }
+
+    var focusedNode: ViewNode? {
+        guard let id = focusedNodeID else { return nil }
+        return Self.findNode(id: id, in: roots)
+    }
+
+    /// Nodes the tree and 3D scene render. When a focus is set, only the
+    /// focused subtree is returned (as a single-element array); otherwise the
+    /// full `roots`. Computed on access so there's no second source of truth
+    /// to keep in sync on every capture.
+    var displayRoots: [ViewNode] {
+        if let focused = focusedNode {
+            return [focused]
+        }
+        return roots
+    }
+
+    /// Enters focus mode on the given node. Also makes it the current
+    /// selection so the inspector and scene highlight line up with the new
+    /// root. Pass `nil` to clear focus (equivalent to `clearFocus()`).
+    func focus(on nodeID: UUID?) {
+        focusedNodeID = nodeID
+        if let nodeID {
+            selectedNodeID = nodeID
+        }
+    }
+
+    func clearFocus() {
+        focusedNodeID = nil
     }
 
     var measurementReferenceNode: ViewNode? {
@@ -238,6 +273,7 @@ final class InspectAppModel: ObservableObject {
     private func resetCapturedState() {
         roots = []
         selectedNodeID = nil
+        focusedNodeID = nil
         measurementReferenceID = nil
         measurementHoverID = nil
         expandedPaths = []
@@ -426,13 +462,25 @@ final class InspectAppModel: ObservableObject {
             oldRoots: oldRoots,
             newRoots: mergedRoots
         )
+        let preservedFocusID = Self.remap(
+            id: focusedNodeID,
+            oldRoots: oldRoots,
+            newRoots: mergedRoots
+        )
 
         self.roots = mergedRoots
+        // If the focused node vanished from the new tree, drop focus so the
+        // user isn't stuck staring at an empty scene with no way to escape
+        // besides disconnecting. Applied before selection fallback so the
+        // fallback sees up-to-date focus state.
+        focusedNodeID = preservedFocusID
 
         if let preservedSelectionID {
             selectedNodeID = preservedSelectionID
-        } else if selectedNodeID == nil || Self.findNode(id: selectedNodeID!, in: mergedRoots) == nil {
-            selectedNodeID = mergedRoots.first?.id
+        } else if selectedNodeID.flatMap({ Self.findNode(id: $0, in: mergedRoots) }) == nil {
+            // While focused, prefer the focused node as the default selection
+            // so the fallback doesn't jump to a root the user can't see.
+            selectedNodeID = preservedFocusID ?? mergedRoots.first?.id
         }
         measurementReferenceID = preservedReferenceID
         measurementHoverID = preservedHoverID

@@ -30,6 +30,8 @@ struct HierarchyNodeRow: View {
         }
         .opacity(isDimmed ? 0.4 : (node.isHidden ? 0.5 : 1.0))
         .contextMenu {
+            NodeFocusMenu(nodeID: node.id)
+            Divider()
             NodeCopyMenu(node: node, stablePath: stablePath)
         }
     }
@@ -77,6 +79,28 @@ struct HierarchyNodeRow: View {
                 RoundedRectangle(cornerRadius: 3)
                     .stroke(.quaternary, lineWidth: 0.5)
                     .frame(width: 12, height: 12)
+            }
+        }
+    }
+}
+
+// MARK: - Focus Menu
+
+/// Context menu fragment for toggling subtree focus. Placed in a separate
+/// view so both the sidebar row and the inspector header can drop it in
+/// without each duplicating the model lookup.
+struct NodeFocusMenu: View {
+    @EnvironmentObject var model: InspectAppModel
+    let nodeID: UUID
+
+    var body: some View {
+        if model.focusedNodeID == nodeID {
+            Button("Exit Focus") {
+                model.clearFocus()
+            }
+        } else {
+            Button("Focus on This View") {
+                model.focus(on: nodeID)
             }
         }
     }

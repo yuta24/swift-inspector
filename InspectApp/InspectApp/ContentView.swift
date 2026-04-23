@@ -12,7 +12,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300)
         } detail: {
             DetailContentView(
-                roots: model.roots,
+                roots: model.displayRoots,
                 selectedNodeID: $model.selectedNodeID,
                 measurementReferenceID: $model.measurementReferenceID,
                 measurementHoverID: $model.measurementHoverID
@@ -43,6 +43,10 @@ struct ContentView: View {
                 }
                 .disabled(!model.isConnected)
                 .keyboardShortcut("r", modifiers: .command)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                FocusToolbarButton()
+                    .environmentObject(model)
             }
             ToolbarItem(placement: .primaryAction) {
                 LiveToolbarControl()
@@ -185,12 +189,88 @@ private struct SidebarView: View {
         VStack(spacing: 0) {
             DevicePickerBar()
             Divider()
+            if let focused = model.focusedNode {
+                FocusBar(node: focused) {
+                    model.clearFocus()
+                }
+                Divider()
+            }
             HierarchyTreeView(
-                roots: model.roots,
+                roots: model.displayRoots,
                 selection: $model.selectedNodeID,
                 filter: $model.hierarchyFilter,
                 expandedPaths: $model.expandedPaths
             )
+        }
+    }
+}
+
+// MARK: - Focus Bar
+
+/// Shown above the tree while a focus is active. Tells the user *why* the
+/// tree is suddenly short and gives a single-click exit. Kept in the sidebar
+/// (not the toolbar) so it's right next to the truncated tree it's explaining.
+private struct FocusBar: View {
+    let node: ViewNode
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "scope")
+                .font(.caption)
+                .foregroundStyle(.tint)
+            Text("Focused on")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(node.className)
+                .font(.caption.monospaced())
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(node.className)
+            Spacer(minLength: 4)
+            Button {
+                onClear()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Exit focus (⌘⇧F)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.12))
+    }
+}
+
+// MARK: - Focus Toolbar Button
+
+/// Toggles subtree focus on the current selection. Split into its own view
+/// so the label/tooltip can reflect both "enter focus on X" and "exit focus"
+/// states without cluttering the main toolbar builder.
+private struct FocusToolbarButton: View {
+    @EnvironmentObject var model: InspectAppModel
+
+    var body: some View {
+        if model.focusedNodeID != nil {
+            Button {
+                model.clearFocus()
+            } label: {
+                Label("Exit Focus", systemImage: "scope")
+                    .symbolVariant(.slash)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .help("Exit focus — show the full hierarchy")
+        } else {
+            Button {
+                guard let id = model.selectedNodeID else { return }
+                model.focus(on: id)
+            } label: {
+                Label("Focus", systemImage: "scope")
+            }
+            .disabled(model.selectedNodeID == nil)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .help("Focus the tree and scene on the selected view (⌘⇧F)")
         }
     }
 }
@@ -427,6 +507,8 @@ private struct InspectorView: View {
                             .textSelection(.enabled)
                     }
                     .contextMenu {
+                        NodeFocusMenu(nodeID: node.id)
+                        Divider()
                         NodeCopyMenu(node: node)
                     }
 
