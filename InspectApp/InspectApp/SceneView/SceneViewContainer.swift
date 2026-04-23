@@ -12,6 +12,20 @@ struct SceneViewContainer: View {
     @Binding var measurementHoverID: UUID?
     @State private var layerSpacing: Float = 30
     @State private var showLabels: Bool = true
+    @State private var showGrid: Bool = false
+    @State private var gridInterval: CGFloat = 8
+    /// Bright-ish blue at 50% alpha. A neutral gray (0.22 alpha) looked
+    /// invisible in practice on mid-tone UI, and thin lines vanish into any
+    /// background they happen to share a luminance with. Designers can always
+    /// dial this down via the ColorPicker — being visible by default is more
+    /// forgiving than being subtle by default.
+    @State private var gridColor: Color = Color(
+        .sRGB,
+        red: 0.0,
+        green: 0.48,
+        blue: 1.0,
+        opacity: 0.5
+    )
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -21,7 +35,10 @@ struct SceneViewContainer: View {
                 measurementReferenceID: $measurementReferenceID,
                 measurementHoverID: $measurementHoverID,
                 layerSpacing: layerSpacing,
-                showLabels: showLabels
+                showLabels: showLabels,
+                showGrid: showGrid,
+                gridInterval: gridInterval,
+                gridColor: gridColor
             )
 
             HStack(spacing: 16) {
@@ -41,12 +58,74 @@ struct SceneViewContainer: View {
                         .font(.caption)
                 }
                 .toggleStyle(.checkbox)
+                GridToolbarControl(
+                    isOn: $showGrid,
+                    interval: $gridInterval,
+                    color: $gridColor
+                )
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
             .padding(12)
         }
+    }
+}
+
+// MARK: - Grid Toolbar Control
+
+/// Compact control that toggles the scene-wide alignment grid and picks the
+/// spacing preset. Click toggles on/off (mirrors the adjacent label checkbox);
+/// the chevron opens the interval picker. Picking a new interval also turns
+/// the grid on so the change is immediately visible — matches how designers
+/// expect "choose 8pt" to imply "show 8pt".
+private struct GridToolbarControl: View {
+    @Binding var isOn: Bool
+    @Binding var interval: CGFloat
+    @Binding var color: Color
+
+    private static let intervalPresets: [CGFloat] = [4, 8, 16]
+
+    var body: some View {
+        Menu {
+            Toggle("Show grid", isOn: $isOn)
+            Section("Interval") {
+                ForEach(Self.intervalPresets, id: \.self) { pt in
+                    Button {
+                        interval = pt
+                        if !isOn { isOn = true }
+                    } label: {
+                        HStack {
+                            Text("\(Int(pt)) pt")
+                            if interval == pt {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            }
+            Section("Color") {
+                // `supportsOpacity: true` lets designers dial the grid down on
+                // busy content without having to pick a different hue. System
+                // color panel opens outside the menu, so the menu stays
+                // navigable.
+                ColorPicker("Color", selection: $color, supportsOpacity: true)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "square.grid.3x3")
+                    .font(.caption)
+                    .foregroundStyle(isOn ? Color.accentColor : .secondary)
+                Text("\(Int(interval))pt")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        } primaryAction: {
+            isOn.toggle()
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(isOn ? "Hide \(Int(interval))pt grid" : "Show \(Int(interval))pt grid")
     }
 }
 
@@ -98,6 +177,9 @@ private struct SceneKitView: NSViewRepresentable {
     @Binding var measurementHoverID: UUID?
     let layerSpacing: Float
     let showLabels: Bool
+    let showGrid: Bool
+    let gridInterval: CGFloat
+    let gridColor: Color
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -147,6 +229,7 @@ private struct SceneKitView: NSViewRepresentable {
             coord.lastSelectedNodeID = selectedNodeID
             coord.lastCompareID = compareID
             refreshMeasurementOverlay(coord: coord, compareID: compareID)
+            applyGridIfNeeded(coord: coord)
             return
         }
 
@@ -159,6 +242,11 @@ private struct SceneKitView: NSViewRepresentable {
             }
             coord.lastLayerSpacing = layerSpacing
             refreshMeasurementOverlay(coord: coord, compareID: compareID)
+            // Grid's "front" Z is relative to plane positions — follow them
+            // when the slider changes instead of rebuilding the whole overlay.
+            if let gridNode = coord.gridNode {
+                positionGridInFront(gridNode, coord: coord)
+            }
         }
 
         // Label visibility change
@@ -191,6 +279,59 @@ private struct SceneKitView: NSViewRepresentable {
             coord.lastCompareID = compareID
             refreshMeasurementOverlay(coord: coord, compareID: compareID)
         }
+
+        applyGridIfNeeded(coord: coord)
+    }
+
+    // MARK: - Grid overlay
+
+    /// Rebuilds the grid node only when one of its inputs (visibility,
+    /// interval, screenArea) has actually changed since the last build. Called
+    /// from both the full-rebuild and incremental-update paths in
+    /// `updateNSView` so live-mode ticks don't tear down and reconstruct ~170
+    /// SCNNodes every second when only the view identities changed.
+    private func applyGridIfNeeded(coord: Coordinator) {
+        guard coord.lastShowGrid != showGrid
+            || coord.lastGridInterval != gridInterval
+            || coord.lastGridScreenArea != coord.screenArea
+            || coord.lastGridColor != gridColor
+        else { return }
+        refreshGridOverlay(coord: coord)
+        coord.lastShowGrid = showGrid
+        coord.lastGridInterval = gridInterval
+        coord.lastGridScreenArea = coord.screenArea
+        coord.lastGridColor = gridColor
+    }
+
+    private func refreshGridOverlay(coord: Coordinator) {
+        coord.gridNode?.removeFromParentNode()
+        coord.gridNode = nil
+        guard showGrid,
+              gridInterval > 0,
+              coord.screenArea != .zero,
+              let sceneRoot = coord.scnView?.scene?.rootNode
+        else { return }
+        let overlay = GridOverlayBuilder.build(
+            screenArea: coord.screenArea,
+            rootHeight: coord.rootHeight,
+            interval: gridInterval,
+            color: NSColor(gridColor)
+        )
+        sceneRoot.addChildNode(overlay)
+        positionGridInFront(overlay, coord: coord)
+        coord.gridNode = overlay
+    }
+
+    /// Parks the grid just in front of the deepest existing plane so it wins
+    /// the depth test regardless of material flags. SceneKit's alpha pass
+    /// sometimes ignores `writesToDepthBuffer=false` and the grid drops behind
+    /// planes; a physically-in-front Z avoids that ambiguity while
+    /// `renderingOrder=9_000` handles the measurement-overlay tie-break.
+    private func positionGridInFront(_ gridNode: SCNNode, coord: Coordinator) {
+        let maxPlaneZ = coord.pathMap.values
+            .map { CGFloat($0.snapshotNode.position.z) }
+            .max() ?? 0
+        gridNode.position = SCNVector3(0, 0, maxPlaneZ + 10)
     }
 
     // MARK: - Measurement overlay (Hyperion-style)
@@ -650,9 +791,21 @@ private struct SceneKitView: NSViewRepresentable {
         var lastShowLabels: Bool?
         var lastSelectedNodeID: UUID??
         var lastCompareID: UUID?
+        var lastShowGrid: Bool?
+        var lastGridInterval: CGFloat?
+        /// screenArea captured at the moment the grid was last (re)built.
+        /// Distinct from `coord.screenArea` (which tracks the current scene
+        /// state) because live-mode ticks can revise `screenArea` to the same
+        /// value after a fresh-UUID snapshot — we want to skip the rebuild in
+        /// that case.
+        var lastGridScreenArea: CGRect?
+        var lastGridColor: Color?
         /// Root SCNNode for the Hyperion-style measurement overlay. Nil when
         /// the tool is idle (no compare node resolved).
         var measurementNode: SCNNode?
+        /// Root SCNNode for the alignment grid overlay. Nil when the grid is
+        /// off or no content is loaded.
+        var gridNode: SCNNode?
         /// Cached from the last rebuild — lets the overlay builder convert
         /// window-frame geometry to scene coordinates without re-walking the
         /// hierarchy.
@@ -1232,6 +1385,101 @@ private enum MeasurementOverlayBuilder {
     private static func formatPt(_ v: CGFloat) -> String {
         if v == v.rounded() { return String(format: "%g pt", v) }
         return String(format: "%.1f pt", v)
+    }
+
+    private static func applyRenderingOrder(_ order: Int, to node: SCNNode) {
+        node.renderingOrder = order
+        for child in node.childNodes {
+            applyRenderingOrder(order, to: child)
+        }
+    }
+}
+
+// MARK: - Grid overlay builder
+
+/// Builds a flat lattice of lines at multiples of `interval` spanning the
+/// screen area, anchored to window coordinates (0,0) so the grid lines up with
+/// how designers reason about iOS layouts. Lines sit in front of every plane
+/// via `renderingOrder` + depth-test off, so orbiting the camera still shows
+/// the full grid rather than a Z-fighting checkerboard.
+private enum GridOverlayBuilder {
+    static func build(
+        screenArea: CGRect,
+        rootHeight: CGFloat,
+        interval: CGFloat,
+        color: NSColor
+    ) -> SCNNode {
+        let root = SCNNode()
+        root.name = "_grid"
+        guard interval > 0, screenArea.width > 0, screenArea.height > 0 else {
+            return root
+        }
+
+        // 1pt wide: two physical pixels on Retina so the line survives at
+        // small camera zooms. Thinner (≤0.5pt) rendered as a sub-pixel smear
+        // and read as "no grid" for most users.
+        let thickness: CGFloat = 1.0
+
+        // Vertical lines at x = k * interval, anchored to window x = 0 so a
+        // 375-wide iPhone content column reads as 0, 8, 16, ... 368.
+        var x = (screenArea.minX / interval).rounded(.down) * interval
+        while x <= screenArea.maxX {
+            if x >= screenArea.minX - 0.01 {
+                root.addChildNode(makeLine(
+                    from: CGPoint(x: x, y: screenArea.minY),
+                    to: CGPoint(x: x, y: screenArea.maxY),
+                    rootHeight: rootHeight,
+                    color: color,
+                    thickness: thickness
+                ))
+            }
+            x += interval
+        }
+
+        var y = (screenArea.minY / interval).rounded(.down) * interval
+        while y <= screenArea.maxY {
+            if y >= screenArea.minY - 0.01 {
+                root.addChildNode(makeLine(
+                    from: CGPoint(x: screenArea.minX, y: y),
+                    to: CGPoint(x: screenArea.maxX, y: y),
+                    rootHeight: rootHeight,
+                    color: color,
+                    thickness: thickness
+                ))
+            }
+            y += interval
+        }
+
+        // Sit above every plane/border/highlight (rendering order < 1000) but
+        // below the measurement overlay (10_000) so dimension lines and labels
+        // remain legible.
+        applyRenderingOrder(9_000, to: root)
+        return root
+    }
+
+    private static func makeLine(
+        from start: CGPoint, to end: CGPoint,
+        rootHeight: CGFloat, color: NSColor, thickness: CGFloat
+    ) -> SCNNode {
+        let s = SCNVector3(start.x, rootHeight - start.y, 0)
+        let e = SCNVector3(end.x, rootHeight - end.y, 0)
+        let dx = e.x - s.x
+        let dy = e.y - s.y
+        let length = sqrt(dx * dx + dy * dy)
+        let plane = SCNPlane(width: CGFloat(length), height: thickness)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = color
+        mat.lightingModel = .constant
+        mat.isDoubleSided = true
+        // Depth test off so the grid renders on top regardless of Z, which is
+        // what lets it stay visible after the camera orbits behind a plane.
+        mat.writesToDepthBuffer = false
+        mat.readsFromDepthBuffer = false
+        plane.materials = [mat]
+        let node = SCNNode(geometry: plane)
+        node.position = SCNVector3((s.x + e.x) / 2, (s.y + e.y) / 2, 0)
+        node.eulerAngles.z = atan2(dy, dx)
+        return node
     }
 
     private static func applyRenderingOrder(_ order: Int, to node: SCNNode) {
