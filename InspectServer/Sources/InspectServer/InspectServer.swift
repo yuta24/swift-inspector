@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || SWIFT_INSPECTOR_ENABLED
 import Foundation
 
 public enum InspectServer {

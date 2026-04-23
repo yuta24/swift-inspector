@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || SWIFT_INSPECTOR_ENABLED
 import Foundation
 import Network
 import InspectCore
@@ -17,7 +17,7 @@ public final class InspectListener {
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
 
-    #if DEBUG && canImport(UIKit)
+    #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
     /// Subscribers for push-updates mode (protocol v3+). Mutated only on the
     /// main actor so it stays in sync with the MainActor-isolated monitor.
     @MainActor private var subscribers: [ObjectIdentifier: NWConnection] = [:]
@@ -74,7 +74,7 @@ public final class InspectListener {
             case let .failed(error):
                 logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
                 self.connections.removeValue(forKey: key)
-                #if DEBUG && canImport(UIKit)
+                #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
                 }
@@ -82,7 +82,7 @@ public final class InspectListener {
             case .cancelled:
                 logger.info("Connection cancelled")
                 self.connections.removeValue(forKey: key)
-                #if DEBUG && canImport(UIKit)
+                #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
                 }
@@ -174,7 +174,7 @@ public final class InspectListener {
             }
         case .subscribeUpdates(let intervalMs):
             logger.info("Received subscribeUpdates (intervalMs=\(intervalMs))")
-            #if DEBUG && canImport(UIKit)
+            #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
             let clampedInterval = max(0.016, Double(intervalMs) / 1000.0)
             Task { @MainActor [weak self] in
                 self?.addSubscriber(connection, intervalSec: clampedInterval)
@@ -184,7 +184,7 @@ public final class InspectListener {
             #endif
         case .unsubscribeUpdates:
             logger.info("Received unsubscribeUpdates")
-            #if DEBUG && canImport(UIKit)
+            #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
             Task { @MainActor [weak self] in
                 self?.removeSubscriber(connection)
             }
@@ -270,7 +270,7 @@ public final class InspectListener {
         #endif
     }
 
-    #if DEBUG && canImport(UIKit)
+    #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
     @MainActor
     private func addSubscriber(_ connection: NWConnection, intervalSec: TimeInterval) {
         let key = ObjectIdentifier(connection)

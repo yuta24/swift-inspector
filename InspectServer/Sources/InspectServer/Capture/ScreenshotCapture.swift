@@ -1,4 +1,4 @@
-#if DEBUG && canImport(UIKit)
+#if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
 import UIKit
 
 public enum ScreenshotCapture {

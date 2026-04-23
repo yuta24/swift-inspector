@@ -1,4 +1,4 @@
-#if DEBUG
+#if DEBUG || SWIFT_INSPECTOR_ENABLED
 #if canImport(UIKit)
 import DeviceKit
 
