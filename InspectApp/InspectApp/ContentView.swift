@@ -212,6 +212,9 @@ private struct DevicePickerBar: View {
                     }
                 }
                 .labelsHidden()
+                .disabled(model.isConnecting)
+                ConnectionActionButton()
+                    .environmentObject(model)
             }
             HStack(spacing: 4) {
                 statusIndicator
@@ -242,13 +245,14 @@ private struct DevicePickerBar: View {
         Binding(
             get: { model.selectedEndpointID },
             set: { newID in
-                model.selectedEndpointID = newID
-                if let newID,
-                   let endpoint = model.discovered.first(where: { $0.id == newID }) {
-                    model.connect(to: endpoint)
-                } else if newID == nil {
-                    model.disconnect()
+                // Staging only — connection lifecycle is driven by the
+                // adjacent ConnectionActionButton. Stale Retry state for the
+                // previous target is cleared here so switching devices after
+                // a failure doesn't surface "Retry for the old one".
+                if newID != model.selectedEndpointID {
+                    model.connectionError = nil
                 }
+                model.selectedEndpointID = newID
             }
         )
     }
@@ -284,6 +288,119 @@ private struct DevicePickerBar: View {
     }
 }
 
+// MARK: - Connection Action Button
+
+/// Unified Connect / Cancel / Disconnect / Switch / Retry affordance.
+/// Renders nothing when there is nothing to act on (no selection, not
+/// connected, no error) — keeps the Picker row uncluttered in the idle state.
+private struct ConnectionActionButton: View {
+    @EnvironmentObject var model: InspectAppModel
+
+    var body: some View {
+        if let action = resolvedAction {
+            // The two button styles (plain for Disconnect, bordered for
+            // everything else) differ in return type under `.buttonStyle`,
+            // so we branch at the view level rather than picking the style
+            // value dynamically.
+            if action == .disconnect {
+                Button(role: .cancel) {
+                    perform(action)
+                } label: {
+                    label(for: action)
+                }
+                .buttonStyle(.plain)
+                .controlSize(.small)
+                .help(tooltip(for: action))
+            } else {
+                Button(role: action.role) {
+                    perform(action)
+                } label: {
+                    label(for: action)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(tooltip(for: action))
+            }
+        }
+    }
+
+    private enum Action {
+        case connect
+        case cancel
+        case disconnect
+        case switchDevice
+        case retry
+
+        var role: ButtonRole? {
+            switch self {
+            case .cancel: return .cancel
+            case .connect, .retry, .switchDevice, .disconnect: return nil
+            }
+        }
+    }
+
+    private var resolvedAction: Action? {
+        if model.isConnecting { return .cancel }
+        if model.isConnected {
+            if let selected = model.selectedEndpointID,
+               selected != model.connectedEndpointID {
+                return .switchDevice
+            }
+            return .disconnect
+        }
+        guard model.selectedEndpointID != nil else { return nil }
+        if model.connectionError != nil { return .retry }
+        return .connect
+    }
+
+    @ViewBuilder
+    private func label(for action: Action) -> some View {
+        switch action {
+        case .connect:
+            Label("Connect", systemImage: "bolt.horizontal.circle")
+        case .cancel:
+            Label("Cancel", systemImage: "stop.circle")
+        case .disconnect:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.tertiary)
+        case .switchDevice:
+            Label("Switch", systemImage: "arrow.triangle.2.circlepath")
+        case .retry:
+            Label("Retry", systemImage: "arrow.clockwise")
+        }
+    }
+
+    private func perform(_ action: Action) {
+        switch action {
+        case .connect, .retry, .switchDevice:
+            guard let id = model.selectedEndpointID,
+                  let endpoint = model.discovered.first(where: { $0.id == id }) else {
+                return
+            }
+            model.connect(to: endpoint)
+        case .cancel, .disconnect:
+            model.disconnect()
+        }
+    }
+
+    private func tooltip(for action: Action) -> String {
+        switch action {
+        case .connect: return "Connect to the selected device"
+        case .cancel: return "Cancel this connection attempt"
+        case .disconnect: return "Disconnect"
+        case .switchDevice:
+            let name = model.discovered
+                .first(where: { $0.id == model.selectedEndpointID })?.name
+                ?? "the selected device"
+            return "Disconnect and connect to \(name)"
+        case .retry:
+            if let error = model.connectionError {
+                return "Retry — last attempt failed: \(error)"
+            }
+            return "Retry the connection"
+        }
+    }
+}
 
 // MARK: - Inspector
 

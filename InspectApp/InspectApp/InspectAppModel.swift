@@ -48,10 +48,17 @@ final class InspectAppModel: ObservableObject {
     /// arrived yet. Surfaced to the UI so the toolbar can show a spinner —
     /// previously private, now published for that purpose.
     @Published private(set) var isInflight: Bool = false
+    /// Endpoint the live connection is bound to. Diverges from
+    /// `selectedEndpointID` when the Picker is staging a different choice —
+    /// the UI uses the mismatch to render a "Switch" action.
+    @Published private(set) var connectedEndpointID: InspectEndpoint.ID?
+    /// Last connect attempt's failure message, if any. Cleared when a fresh
+    /// connect is initiated or the user changes the staged selection. Drives
+    /// the Retry action in the sidebar.
+    @Published var connectionError: String?
 
     private let browser = InspectBrowser()
     private var client: InspectClient?
-    private var connectedEndpointID: InspectEndpoint.ID?
     private var highlightCancellable: AnyCancellable?
     /// Protocol version advertised by the peer's handshake. Nil until handshake
     /// arrives. Used to decide whether live mode can use push subscription
@@ -134,6 +141,7 @@ final class InspectAppModel: ObservableObject {
 
     func connect(to endpoint: InspectEndpoint) {
         disconnect()
+        connectionError = nil
         let client = InspectClient()
         client.onStatus = { [weak self] message in
             Task { @MainActor in self?.status = message }
@@ -146,6 +154,11 @@ final class InspectAppModel: ObservableObject {
                 self.connectedEndpointID = endpoint.id
                 self.markConnected(endpointID: endpoint.id)
                 self.requestHierarchy()
+            }
+        }
+        client.onFailed = { [weak self] error in
+            Task { @MainActor in
+                self?.connectionError = error.localizedDescription
             }
         }
         client.onDisconnected = { [weak self] in
@@ -162,6 +175,7 @@ final class InspectAppModel: ObservableObject {
                 self.serverProtocolVersion = nil
                 self.connectedEndpointID = nil
                 self.markConnected(endpointID: nil)
+                self.resetCapturedState()
             }
         }
         client.onMessage = { [weak self] message in
@@ -184,6 +198,7 @@ final class InspectAppModel: ObservableObject {
         client?.onStatus = nil
         client?.onConnected = nil
         client?.onDisconnected = nil
+        client?.onFailed = nil
         client?.onMessage = nil
 
         stopLiveTimer()
@@ -204,6 +219,22 @@ final class InspectAppModel: ObservableObject {
         connectedEndpointID = nil
         connectedDeviceName = ""
         markConnected(endpointID: nil)
+        resetCapturedState()
+        // User-initiated disconnect detaches onStatus first, so the
+        // client's own `.cancelled` transition no longer drives the label.
+        // Reflect the new idle-but-still-discovering state explicitly.
+        status = "browsing"
+    }
+
+    /// Clears everything derived from a captured hierarchy so the detail,
+    /// sidebar tree, and measurement overlays don't linger after the
+    /// connection closes. Connection-level flags (`isConnected`, timers,
+    /// subscriptions) are owned by the surrounding teardown paths.
+    private func resetCapturedState() {
+        roots = []
+        selectedNodeID = nil
+        measurementReferenceID = nil
+        measurementHoverID = nil
     }
 
     func shutdown() {

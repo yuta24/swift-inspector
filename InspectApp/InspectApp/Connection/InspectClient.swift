@@ -10,6 +10,11 @@ final class InspectClient {
     var onStatus: ((String) -> Void)?
     var onConnected: (() -> Void)?
     var onDisconnected: (() -> Void)?
+    /// Invoked only when NWConnection transitions to `.failed`. Distinct from
+    /// `onDisconnected`, which also fires on user-initiated cancel — callers
+    /// that need to flag an actual error (to drive a Retry UI, say) should
+    /// listen here rather than sniff the status string.
+    var onFailed: ((Error) -> Void)?
 
     private let queue = DispatchQueue(label: "swift-inspector.client")
     private let serializer: MessageSerializer = JSONMessageSerializer()
@@ -34,6 +39,7 @@ final class InspectClient {
             case let .failed(error):
                 logger.error("Client connection failed: \(error.localizedDescription, privacy: .public)")
                 self.onStatus?("failed: \(error.localizedDescription)")
+                self.onFailed?(error)
                 self.onDisconnected?()
             case .cancelled:
                 logger.info("Client connection cancelled")
