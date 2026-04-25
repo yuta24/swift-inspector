@@ -499,6 +499,26 @@ private struct SceneKitView: NSViewRepresentable {
         let expanded = screenArea.insetBy(dx: -margin, dy: -margin)
         if !expanded.intersects(cullReference) { return }
 
+        // Clip the rendered plane to the viewport so off-screen content
+        // (most commonly a UIScrollView's content layer, whose frame may
+        // be several screen-heights tall and offset by a scroll position)
+        // doesn't dominate the 3D scene. Children keep walking from the
+        // unclipped `absoluteOrigin` so their own positions stay correct
+        // — only this node's draw geometry shrinks.
+        let renderRect = absoluteFrame.intersection(screenArea)
+        let renderOrigin: CGPoint
+        let renderSize: CGSize
+        if renderRect.isNull || renderRect.isEmpty {
+            // Fully outside the viewport but inside the cull margin —
+            // keep the node so children still get walked, but draw it at
+            // its original geometry rather than collapsing to zero.
+            renderOrigin = absoluteOrigin
+            renderSize = CGSize(width: w, height: h)
+        } else {
+            renderOrigin = renderRect.origin
+            renderSize = renderRect.size
+        }
+
         let myIndex = traversalIndex
         traversalIndex += 1
 
@@ -507,8 +527,8 @@ private struct SceneKitView: NSViewRepresentable {
             path: pathPrefix,
             depth: depth,
             traversalIndex: myIndex,
-            absoluteOrigin: absoluteOrigin,
-            size: CGSize(width: w, height: h),
+            absoluteOrigin: renderOrigin,
+            size: renderSize,
             isSelected: node.id == selectedNodeID
         ))
 
