@@ -51,6 +51,14 @@ private struct UpdaterStack {
 @MainActor
 private func makeUpdaterStack() -> UpdaterStack? {
     guard Bundle.main.bundleURL.pathExtension == "app" else { return nil }
+    // Sparkle refuses to start when there's no EdDSA public key to verify
+    // updates against, and surfaces a modal "updater failed to start"
+    // alert. Local smoke builds (built without `SPARKLE_PUBLIC_KEY`) ship
+    // with an empty key by design — skip the updater stack entirely so
+    // those builds launch cleanly. Production CI builds always have the
+    // key set, so this gate is invisible there.
+    let publicKey = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+    guard let publicKey, !publicKey.isEmpty else { return nil }
     let controller = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
