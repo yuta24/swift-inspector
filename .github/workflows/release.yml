@@ -1,0 +1,239 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUILD_NUM=$(git rev-list --count HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_num=$BUILD_NUM" >> "$GITHUB_OUTPUT"
+
+      - name: Import Developer ID certificate
+        env:
+          DEV_ID_CERT_P12: ${{ secrets.DEV_ID_CERT_P12 }}
+          DEV_ID_CERT_PASSWORD: ${{ secrets.DEV_ID_CERT_PASSWORD }}
+        run: |
+          # Keychain is isolated to this runner and torn down with it, so we
+          # don't bother cleaning up afterwards.
+          KEYCHAIN=release.keychain
+          security create-keychain -p runner "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p runner "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          echo "$DEV_ID_CERT_P12" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k "$KEYCHAIN" \
+            -P "$DEV_ID_CERT_PASSWORD" -T /usr/bin/codesign
+          rm /tmp/cert.p12
+          # Allow codesign to access the imported key without an interactive
+          # prompt. Without this, `codesign` hangs on the runner.
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k runner "$KEYCHAIN"
+
+      - name: Build .app bundle
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+        run: |
+          bash scripts/build_app.sh \
+            "${{ steps.version.outputs.version }}" \
+            "${{ steps.version.outputs.build_num }}"
+
+      - name: Prepare entitlements
+        run: |
+          # Sparkle launches Installer.xpc / Downloader.xpc out-of-process;
+          # under hardened runtime with Library Validation enabled those
+          # helpers fail to load and updates silently break. Disabling
+          # library validation is Sparkle's documented requirement for
+          # Developer ID builds.
+          cat > build/entitlements.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.cs.disable-library-validation</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Codesign .app
+        env:
+          SIGNING_IDENTITY: ${{ secrets.DEV_ID_SIGNING_IDENTITY }}
+        run: |
+          APP=build/InspectApp.app
+          FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+          ENTITLEMENTS=build/entitlements.plist
+
+          # Sign every nested helper before the outer bundle. Sparkle ships
+          # a secondary Updater.app plus XPCServices; --deep alone doesn't
+          # reliably reach all of them under hardened runtime, and each XPC
+          # helper needs the same `disable-library-validation` entitlement
+          # as the outer app — without it the helpers fail to launch and
+          # Sparkle silently stalls during the install phase.
+          find "$FRAMEWORK" -type f \( -name "*.dylib" -o -perm +111 \) \
+            -exec codesign --force --timestamp --options runtime \
+              --sign "$SIGNING_IDENTITY" {} \; 2>/dev/null || true
+
+          for XPC in \
+              "$FRAMEWORK/Versions/B/XPCServices/Installer.xpc" \
+              "$FRAMEWORK/Versions/B/XPCServices/Downloader.xpc"; do
+            if [ -d "$XPC" ]; then
+              codesign --force --timestamp --options runtime \
+                --entitlements "$ENTITLEMENTS" \
+                --sign "$SIGNING_IDENTITY" "$XPC"
+            fi
+          done
+
+          codesign --force --timestamp --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$SIGNING_IDENTITY" \
+            "$FRAMEWORK/Versions/B/Updater.app"
+          codesign --force --timestamp --options runtime \
+            --sign "$SIGNING_IDENTITY" \
+            "$FRAMEWORK"
+
+          codesign --force --timestamp --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$SIGNING_IDENTITY" \
+            "$APP"
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Zip for notarization
+        run: |
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent \
+            InspectApp.app \
+            "InspectApp-${{ steps.version.outputs.version }}.zip"
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARYTOOL_PASSWORD: ${{ secrets.NOTARYTOOL_PASSWORD }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+        run: |
+          xcrun notarytool submit \
+            "build/InspectApp-${{ steps.version.outputs.version }}.zip" \
+            --apple-id "$APPLE_ID" \
+            --password "$NOTARYTOOL_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait
+
+      - name: Staple ticket
+        run: |
+          xcrun stapler staple build/InspectApp.app
+          # Re-zip so the released archive carries the stapled ticket.
+          rm "build/InspectApp-${{ steps.version.outputs.version }}.zip"
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent \
+            InspectApp.app \
+            "InspectApp-${{ steps.version.outputs.version }}.zip"
+
+      - name: Sign update with Sparkle EdDSA
+        id: sparkle_sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          # SPM ships Sparkle as a binary artifact bundle, which lands
+          # under .build/artifacts. Search there first; fall back to the
+          # checkouts tree in case the layout changes in a future version.
+          SIGN_UPDATE=$(find InspectApp/.build/artifacts -name sign_update -type f -perm +111 2>/dev/null | head -n1)
+          if [ -z "$SIGN_UPDATE" ]; then
+            SIGN_UPDATE=$(find InspectApp/.build -name sign_update -type f -perm +111 2>/dev/null | head -n1)
+          fi
+          if [ -z "$SIGN_UPDATE" ]; then
+            echo "sign_update tool not found under InspectApp/.build" >&2
+            exit 1
+          fi
+
+          # Guarantee the private key file is removed even if sign_update
+          # exits non-zero; without the trap, `set -e` would abort before
+          # the manual rm and leave the key on the runner.
+          KEY_FILE=$(mktemp)
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+
+          # sign_update -f outputs something like:
+          #   sparkle:edSignature="..." length="..."
+          # Strip newlines defensively in case a future Sparkle version
+          # appends extra whitespace; the output is interpolated directly
+          # into a single XML attribute group, so a stray \n would corrupt
+          # the appcast.
+          SIGNATURE_OUTPUT=$("$SIGN_UPDATE" \
+            "build/InspectApp-${{ steps.version.outputs.version }}.zip" \
+            -f "$KEY_FILE" | tr -d '\n')
+
+          {
+            echo "signature_attrs<<SIGEOF"
+            echo "$SIGNATURE_OUTPUT"
+            echo "SIGEOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/InspectApp-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
+
+      - name: Publish appcast.xml to gh-pages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUM: ${{ steps.version.outputs.build_num }}
+          SIGNATURE_ATTRS: ${{ steps.sparkle_sign.outputs.signature_attrs }}
+        run: |
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/InspectApp-${VERSION}.zip"
+          PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+
+          APPCAST=$(mktemp)
+          cat > "$APPCAST" <<APPCASTEOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>swift-inspector</title>
+              <link>https://github.com/${{ github.repository }}</link>
+              <description>swift-inspector updates</description>
+              <language>en</language>
+              <item>
+                <title>Version ${VERSION}</title>
+                <sparkle:version>${BUILD_NUM}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <pubDate>${PUB_DATE}</pubDate>
+                <enclosure
+                  url="${DOWNLOAD_URL}"
+                  type="application/octet-stream"
+                  ${SIGNATURE_ATTRS} />
+              </item>
+            </channel>
+          </rss>
+          APPCASTEOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+          if git show-ref --quiet refs/heads/gh-pages; then
+            git checkout gh-pages
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . || true
+          fi
+          cp "$APPCAST" appcast.xml
+          git add appcast.xml
+          git commit -m "Update appcast for ${VERSION}" || true
+          git push origin gh-pages

@@ -71,3 +71,74 @@ source makes this the default when you do nothing special.
    once Bonjour discovery resolves it.
 3. Select the device and press **Connect** to capture the current
    hierarchy, then use **Live** for auto-refreshing updates.
+
+## Installing the macOS client
+
+Download the latest `InspectApp-<version>.zip` from
+[Releases](https://github.com/yuta24/swift-inspector/releases), unzip,
+and drag `InspectApp.app` into `~/Applications/` (or another location
+you can write to — Sparkle needs write access to replace the bundle
+during updates).
+
+Built-in update checking: the app checks once at launch and again
+every 24 hours, and you can trigger a manual check via **swift-inspector
+→ アップデートを確認…** in the menu bar.
+
+## Releasing a new version
+
+Releases are fully automated by `.github/workflows/release.yml`. The
+one-time setup below has to land before the first tag.
+
+### One-time setup
+
+**1. Generate the EdDSA key pair.** Sparkle ships `generate_keys` inside
+its SPM artifact. After running `swift package resolve` in `InspectApp/`
+once, locate it and run:
+
+```sh
+SIGN_TOOLS=$(find InspectApp/.build/artifacts -name generate_keys -perm +111 | head -n1)
+"$SIGN_TOOLS"
+```
+
+It prints the public key on stdout and stores the private key in the
+macOS Keychain. Export the private key with `"$SIGN_TOOLS" -x` and
+register both into GitHub Secrets (see the table below).
+
+**2. Create the `gh-pages` branch and enable GitHub Pages.**
+
+```sh
+git checkout --orphan gh-pages
+git rm -rf .
+git commit --allow-empty -m "init gh-pages"
+git push origin gh-pages
+git checkout main
+```
+
+Then in GitHub: **Settings → Pages → Build and deployment → Source:
+Deploy from a branch → `gh-pages` / `(root)`**. The workflow publishes
+`appcast.xml` to that branch and it gets served at
+`https://yuta24.github.io/swift-inspector/appcast.xml` — that URL is
+baked into the app via `SUFeedURL`.
+
+**3. Register repository secrets.**
+
+| Secret | Value |
+| --- | --- |
+| `SPARKLE_PRIVATE_KEY` | EdDSA private key (`generate_keys -x` output). |
+| `SPARKLE_PUBLIC_KEY`  | Matching public key, embedded into `Info.plist` at build time. |
+| `DEV_ID_CERT_P12`     | Developer ID Application `.p12`, base64-encoded. |
+| `DEV_ID_CERT_PASSWORD`| Password for the `.p12`. |
+| `DEV_ID_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)`. |
+| `APPLE_ID`, `NOTARYTOOL_PASSWORD`, `TEAM_ID` | Notarization credentials. |
+
+### Cutting a release
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds the `.app`, codesigns and notarizes it, signs the
+archive with the EdDSA key, uploads it as a Release asset, and updates
+`appcast.xml` on `gh-pages`. Running clients pick up the new version on
+their next launch or manual check.
