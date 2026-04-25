@@ -4,6 +4,7 @@ import InspectCore
 
 struct ContentView: View {
     @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var crashPresenter: CrashReportPresenter
     @State private var showInspector = true
 
     var body: some View {
@@ -27,6 +28,21 @@ struct ContentView: View {
                 measurementReferenceID: $model.measurementReferenceID
             )
             .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+        }
+        .sheet(isPresented: crashSheetBinding) {
+            CrashReportSheet(
+                reports: crashPresenter.pendingReports,
+                onSkip: { crashPresenter.dismiss() },
+                onSuppress: { crashPresenter.dismiss(suppressForever: true) },
+                onReport: { report in
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(report.rawContents, forType: .string)
+                    if let url = crashPresenter.issueURL(for: report) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            )
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -60,6 +76,21 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Drives `.sheet(isPresented:)` from the presenter's pending list. The
+    /// setter only reacts to a `false` write — the sheet itself never sets
+    /// it back to `true`, and dismissals always go through one of the
+    /// presenter's explicit dismiss callbacks.
+    private var crashSheetBinding: Binding<Bool> {
+        Binding(
+            get: { !crashPresenter.pendingReports.isEmpty },
+            set: { isShown in
+                if !isShown && !crashPresenter.pendingReports.isEmpty {
+                    crashPresenter.dismiss()
+                }
+            }
+        )
     }
 }
 

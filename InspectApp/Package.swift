@@ -26,5 +26,10 @@ let package = Package(
                 "Preview Content",
             ]
         ),
+        .testTarget(
+            name: "InspectAppTests",
+            dependencies: ["InspectApp"],
+            path: "InspectAppTests"
+        ),
     ]
 )
