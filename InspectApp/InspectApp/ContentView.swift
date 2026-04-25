@@ -695,18 +695,14 @@ private struct FrameSection: View {
 
     var body: some View {
         GroupBox {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                GridRow {
-                    PropertyLabel("X")
-                    PropertyValue(String(format: "%g", frame.origin.x))
-                    PropertyLabel("Y")
-                    PropertyValue(String(format: "%g", frame.origin.y))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 12) {
+                    fieldPair(label: "X", value: frame.origin.x)
+                    fieldPair(label: "Y", value: frame.origin.y)
                 }
-                GridRow {
-                    PropertyLabel("Width")
-                    PropertyValue(String(format: "%g", frame.size.width))
-                    PropertyLabel("Height")
-                    PropertyValue(String(format: "%g", frame.size.height))
+                HStack(spacing: 12) {
+                    fieldPair(label: "Width", value: frame.size.width)
+                    fieldPair(label: "Height", value: frame.size.height)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -714,6 +710,30 @@ private struct FrameSection: View {
         } label: {
             SectionHeader("Frame", icon: "rectangle.dashed")
         }
+    }
+
+    /// Two pairs share the inspector width via a 50/50 split (both pairs
+    /// use `.frame(maxWidth: .infinity)` inside an HStack). Within a pair
+    /// the label is left-anchored and the value right-anchored so X/Width
+    /// stack into the same vertical rail and Y/Height into another —
+    /// easier to scan than a four-column grid for designers.
+    ///
+    /// Avoids the shared `PropertyLabel`/`PropertyValue` because the
+    /// former's `minWidth: 100` consumes most of the half-pair, pushing
+    /// long values (e.g. "-1163.5") past the inspector edge.
+    private func fieldPair(label: String, value: CGFloat) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(String(format: "%g", value))
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
