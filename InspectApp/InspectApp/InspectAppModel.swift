@@ -44,6 +44,12 @@ final class InspectAppModel: ObservableObject {
     /// users can tell a click was registered.
     @Published var isConnecting: Bool = false
     @Published var connectedDeviceName: String = ""
+    /// True between sending `requestPair` and receiving the device's
+    /// `pairResult`. The UI surfaces a "デバイス側で承認してください…" banner
+    /// during this window so the user knows to look at the device, not the
+    /// Mac. False against pre-pairing servers (protocol < 4) where the
+    /// step is skipped entirely.
+    @Published private(set) var isAwaitingPairApproval: Bool = false
     @Published var isLiveMode: Bool = false
     @Published var liveInterval: TimeInterval = 1.0
     /// Transport currently backing live mode. Never `.poll` or `.push`
@@ -88,6 +94,12 @@ final class InspectAppModel: ObservableObject {
     /// `.waiting` indefinitely on flaky networks, which would otherwise
     /// latch the "Connecting…" spinner forever.
     private static let connectingTimeout: TimeInterval = 10.0
+    /// Upper bound on how long we wait for the device user to approve a
+    /// pair request. Generous because the device is the user's other hand —
+    /// they may need to unlock it, dismiss a different alert, or walk over
+    /// to it. After this we surface an explicit timeout so the Mac client
+    /// doesn't sit silently forever.
+    private static let pairApprovalTimeout: TimeInterval = 60.0
 
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
@@ -193,7 +205,9 @@ final class InspectAppModel: ObservableObject {
                 self.isConnecting = false
                 self.connectedEndpointID = endpoint.id
                 self.markConnected(endpointID: endpoint.id)
-                self.requestHierarchy()
+                // Don't request the hierarchy yet — we wait for the
+                // server's handshake so we can decide whether pairing is
+                // required (protocol >= 4) or skip it (older servers).
             }
         }
         client.onFailed = { [weak self] error in
@@ -206,6 +220,7 @@ final class InspectAppModel: ObservableObject {
                 guard let self else { return }
                 self.isConnected = false
                 self.isConnecting = false
+                self.isAwaitingPairApproval = false
                 self.isInflight = false
                 self.inflightSentAt = nil
                 self.isLiveMode = false
@@ -251,6 +266,7 @@ final class InspectAppModel: ObservableObject {
         isInflight = false
         inflightSentAt = nil
         isConnecting = false
+        isAwaitingPairApproval = false
         serverProtocolVersion = nil
         client?.send(.highlightView(ident: nil))
         client?.disconnect()
@@ -412,8 +428,10 @@ final class InspectAppModel: ObservableObject {
         case let .handshake(handshake):
             logger.info("Model received handshake: \(handshake.deviceName, privacy: .public) \(handshake.systemName, privacy: .public) \(handshake.systemVersion, privacy: .public) protocol=\(handshake.protocolVersion)")
             connectedDeviceName = "\(handshake.deviceName) — \(handshake.systemName) \(handshake.systemVersion)"
-            status = "connected: \(handshake.deviceName)"
             serverProtocolVersion = handshake.protocolVersion
+            beginPairingIfNeeded(for: handshake)
+        case let .pairResult(outcome):
+            handlePairResult(outcome)
         case let .hierarchy(newRoots):
             let nodeCount = Self.countNodes(in: newRoots)
             logger.info("Model received hierarchy: \(newRoots.count) root(s), \(nodeCount) total node(s)")
@@ -425,8 +443,61 @@ final class InspectAppModel: ObservableObject {
             isInflight = false
             inflightSentAt = nil
             status = "error: \(message)"
-        case .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView:
+        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView:
             break
+        }
+    }
+
+    /// Decides between the v4 pair flow and the legacy "request hierarchy
+    /// immediately" path based on the server's advertised protocol version.
+    /// Pre-v4 servers don't understand `requestPair`, so sending it would
+    /// just earn an `error("decode failed")` — fall back to the old behavior
+    /// instead so older devices still work after an InspectApp upgrade.
+    private func beginPairingIfNeeded(for handshake: InspectMessage.Handshake) {
+        if handshake.protocolVersion >= InspectProtocol.pairingMinVersion {
+            isAwaitingPairApproval = true
+            status = "デバイス側で接続を承認してください…"
+            let identity = ClientIdentityStore.current()
+            client?.send(.requestPair(identity))
+            schedulePairTimeout(for: client)
+        } else {
+            status = "connected: \(handshake.deviceName)"
+            requestHierarchy()
+        }
+    }
+
+    private func handlePairResult(_ outcome: InspectMessage.PairOutcome) {
+        isAwaitingPairApproval = false
+        switch outcome {
+        case .approved:
+            logger.info("Pair approved")
+            status = "connected: \(connectedDeviceName)"
+            requestHierarchy()
+        case let .rejected(reason):
+            logger.info("Pair rejected: \(reason, privacy: .public)")
+            connectionError = reason
+            status = "rejected: \(reason)"
+            // The server cancels the socket itself after sending the
+            // rejection; calling disconnect() here makes the teardown
+            // deterministic from the UI side and clears the live timer
+            // before the late `.cancelled` callback arrives.
+            disconnect()
+        }
+    }
+
+    /// Bails out of the pair-waiting state if the device user never
+    /// responds. Without this the "デバイス側で承認してください…" banner
+    /// would stay up forever and the user would think the app is hung.
+    private func schedulePairTimeout(for client: InspectClient?) {
+        let deadlineNs = UInt64(Self.pairApprovalTimeout * 1_000_000_000)
+        Task { @MainActor [weak self, weak client] in
+            try? await Task.sleep(nanoseconds: deadlineNs)
+            guard let self, let client, self.client === client else { return }
+            guard self.isAwaitingPairApproval else { return }
+            self.isAwaitingPairApproval = false
+            self.connectionError = "デバイス側で承認されませんでした（タイムアウト）"
+            self.status = "pair timeout"
+            self.disconnect()
         }
     }
 

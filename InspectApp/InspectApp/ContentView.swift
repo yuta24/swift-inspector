@@ -48,6 +48,7 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 ActivityIndicator(
                     isConnecting: model.isConnecting,
+                    isAwaitingPair: model.isAwaitingPairApproval,
                     isInflight: model.isInflight
                 )
             }
@@ -101,14 +102,21 @@ struct ContentView: View {
 /// when idle so it collapses out of the toolbar layout.
 private struct ActivityIndicator: View {
     let isConnecting: Bool
+    let isAwaitingPair: Bool
     let isInflight: Bool
 
     var body: some View {
-        if isConnecting || isInflight {
+        if isConnecting || isAwaitingPair || isInflight {
             ProgressView()
                 .controlSize(.small)
-                .help(isConnecting ? "Connecting…" : "Capturing hierarchy…")
+                .help(tooltip)
         }
+    }
+
+    private var tooltip: String {
+        if isConnecting { return "Connecting…" }
+        if isAwaitingPair { return "デバイス側で承認待ち…" }
+        return "Capturing hierarchy…"
     }
 }
 
@@ -372,7 +380,7 @@ private struct DevicePickerBar: View {
 
     @ViewBuilder
     private var statusIndicator: some View {
-        if model.isConnecting {
+        if model.isConnecting || model.isAwaitingPairApproval {
             ProgressView()
                 .controlSize(.mini)
                 .scaleEffect(0.7)
@@ -385,8 +393,10 @@ private struct DevicePickerBar: View {
     }
 
     private var statusColor: Color {
+        if model.isAwaitingPairApproval { return .orange }
         if model.isConnected { return .green }
-        if model.status.hasPrefix("error") || model.status.hasPrefix("failed") {
+        if model.status.hasPrefix("error") || model.status.hasPrefix("failed")
+            || model.status.hasPrefix("rejected") || model.status.hasPrefix("pair timeout") {
             return .red
         }
         return .secondary
@@ -454,6 +464,12 @@ private struct ConnectionActionButton: View {
 
     private var resolvedAction: Action? {
         if model.isConnecting { return .cancel }
+        // While the device-side approval prompt is open the TCP socket
+        // already says `.ready` (so `isConnected` is true), but the user's
+        // intent for the button is still "cancel this in-flight attempt"
+        // rather than "tear down a working session". Surface Cancel so the
+        // affordance matches the mental model.
+        if model.isAwaitingPairApproval { return .cancel }
         if model.isConnected {
             if let selected = model.selectedEndpointID,
                selected != model.connectedEndpointID {

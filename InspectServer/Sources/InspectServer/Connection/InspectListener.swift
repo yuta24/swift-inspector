@@ -14,8 +14,16 @@ public final class InspectListener {
     private let queue = DispatchQueue(label: "swift-inspector.listener")
     private let serializer: MessageSerializer
     private let serviceName: String
+    private let pairingStore: PairingStore
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Connections that have completed pairing. Mutated only on `queue`,
+    /// which serializes alongside `connections` and the receive callbacks.
+    private var authorizedConnections: Set<ObjectIdentifier> = []
+    /// Connections currently waiting on the device-side approval prompt.
+    /// Used so a buggy or malicious client that sends `requestPair` twice
+    /// doesn't queue up two simultaneous dialogs for the user.
+    private var pendingPairConnections: Set<ObjectIdentifier> = []
 
     #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
     /// Subscribers for push-updates mode (protocol v3+). Mutated only on the
@@ -30,6 +38,7 @@ public final class InspectListener {
     ) {
         self.serializer = serializer
         self.serviceName = serviceName ?? Self.defaultServiceName()
+        self.pairingStore = PairingStore()
     }
 
     public func start() throws {
@@ -57,6 +66,8 @@ public final class InspectListener {
             connection.cancel()
         }
         connections.removeAll()
+        authorizedConnections.removeAll()
+        pendingPairConnections.removeAll()
     }
 
     private func accept(_ connection: NWConnection) {
@@ -73,7 +84,7 @@ public final class InspectListener {
                 self.receiveNext(on: connection)
             case let .failed(error):
                 logger.error("Connection failed: \(error.localizedDescription, privacy: .public)")
-                self.connections.removeValue(forKey: key)
+                self.cleanupConnectionState(key: key)
                 #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
@@ -81,7 +92,7 @@ public final class InspectListener {
                 #endif
             case .cancelled:
                 logger.info("Connection cancelled")
-                self.connections.removeValue(forKey: key)
+                self.cleanupConnectionState(key: key)
                 #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
@@ -92,6 +103,12 @@ public final class InspectListener {
             }
         }
         connection.start(queue: queue)
+    }
+
+    private func cleanupConnectionState(key: ObjectIdentifier) {
+        connections.removeValue(forKey: key)
+        authorizedConnections.remove(key)
+        pendingPairConnections.remove(key)
     }
 
     private func sendHandshake(on connection: NWConnection) {
@@ -149,8 +166,25 @@ public final class InspectListener {
         do {
             message = try serializer.decode(data)
         } catch {
-            logger.error("Server decode failed: \(error.localizedDescription, privacy: .public)")
-            send(.error("decode failed: \(error)"), on: connection)
+            // Keep the detailed reason out of the wire payload — Swift's
+            // `\(error)` description for `DecodingError` exposes coding-key
+            // names that leak internal model shape. The full diagnostic
+            // stays in the server-side log instead.
+            logger.error("Server decode failed: \(String(describing: error), privacy: .public)")
+            send(.error("decode failed"), on: connection)
+            return
+        }
+
+        let key = ObjectIdentifier(connection)
+
+        if case let .requestPair(identity) = message {
+            handlePairRequest(identity: identity, on: connection, key: key)
+            return
+        }
+
+        guard authorizedConnections.contains(key) else {
+            logger.warning("Rejecting message before pairing: \(String(describing: message).prefix(40), privacy: .public)")
+            send(.error("not paired"), on: connection)
             return
         }
 
@@ -194,11 +228,107 @@ public final class InspectListener {
             Task { @MainActor in
                 Self.applyHighlight(ident: ident)
             }
-        case .handshake, .hierarchy, .error:
+        case .requestPair, .pairResult, .handshake, .hierarchy, .error:
             logger.debug("Server ignoring message: \(String(describing: message).prefix(80), privacy: .public)")
             break
         }
     }
+
+    private func handlePairRequest(
+        identity: InspectMessage.ClientIdentity,
+        on connection: NWConnection,
+        key: ObjectIdentifier
+    ) {
+        if authorizedConnections.contains(key) {
+            // Tolerate redundant requestPair on an already-authorized
+            // connection rather than tearing it down.
+            send(.pairResult(.approved), on: connection)
+            return
+        }
+
+        if pairingStore.isTrusted(clientID: identity.clientID) {
+            logger.info("Auto-approving trusted client: \(identity.clientName, privacy: .public)")
+            authorizedConnections.insert(key)
+            send(.pairResult(.approved), on: connection)
+            return
+        }
+
+        guard !pendingPairConnections.contains(key) else {
+            logger.warning("Duplicate requestPair while prompt is open; ignoring")
+            return
+        }
+        pendingPairConnections.insert(key)
+
+        #if canImport(UIKit)
+        let clientID = identity.clientID
+        let clientName = identity.clientName
+        Task { @MainActor [weak self] in
+            PairingPrompt.ask(clientName: clientName) { decision in
+                self?.queue.async { [weak self] in
+                    self?.completePair(
+                        connection: connection,
+                        key: key,
+                        clientID: clientID,
+                        decision: decision
+                    )
+                }
+            }
+        }
+        #else
+        // Non-UIKit hosts can't show a prompt; auto-deny so the client gets
+        // a deterministic answer rather than hanging.
+        completePair(connection: connection, key: key, clientID: identity.clientID, decision: .deny)
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private func completePair(
+        connection: NWConnection,
+        key: ObjectIdentifier,
+        clientID: String,
+        decision: PairingDecision
+    ) {
+        pendingPairConnections.remove(key)
+        guard connections[key] != nil else {
+            // Connection died while the user was deciding — nothing to do.
+            return
+        }
+        switch decision {
+        case .alwaysAllow:
+            pairingStore.trust(clientID: clientID)
+            authorizedConnections.insert(key)
+            send(.pairResult(.approved), on: connection)
+        case .allowOnce:
+            authorizedConnections.insert(key)
+            send(.pairResult(.approved), on: connection)
+        case .deny:
+            send(.pairResult(.rejected(reason: "デバイス側で接続が拒否されました")), on: connection)
+            // Give the framing layer a beat to flush the rejection before
+            // tearing the socket down, otherwise the client may see only
+            // an EOF and surface a generic "disconnected" rather than the
+            // explicit reason.
+            queue.asyncAfter(deadline: .now() + 0.1) { [weak connection] in
+                connection?.cancel()
+            }
+        }
+    }
+    #else
+    private func completePair(
+        connection: NWConnection,
+        key: ObjectIdentifier,
+        clientID: String,
+        decision: PairingDecision
+    ) {
+        pendingPairConnections.remove(key)
+        send(.pairResult(.rejected(reason: "このプラットフォームでは承認できません")), on: connection)
+        queue.asyncAfter(deadline: .now() + 0.1) { [weak connection] in
+            connection?.cancel()
+        }
+    }
+
+    /// Mirrored on non-UIKit builds so `handlePairRequest` compiles.
+    private enum PairingDecision { case alwaysAllow, allowOnce, deny }
+    #endif
 
     private func send(_ message: InspectMessage, on connection: NWConnection) {
         let data: Data
@@ -225,7 +355,7 @@ public final class InspectListener {
     private func fail(_ connection: NWConnection, error: Error) {
         logger.error("Connection failure: \(error.localizedDescription, privacy: .public)")
         connection.cancel()
-        connections.removeValue(forKey: ObjectIdentifier(connection))
+        cleanupConnectionState(key: ObjectIdentifier(connection))
     }
 
     private static func countNodes(in nodes: [ViewNode]) -> Int {

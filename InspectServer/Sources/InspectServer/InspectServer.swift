@@ -19,5 +19,15 @@ public enum InspectServer {
         listener?.stop()
         listener = nil
     }
+
+    /// Clears every remembered Mac so the next connection request will
+    /// prompt the user again. Wire this to a "信頼する Mac をリセット"
+    /// action in your debug menu when a designer mistakenly approves the
+    /// wrong host. Works regardless of whether the listener is currently
+    /// running — the trusted list lives in `UserDefaults`, not in
+    /// listener state.
+    public static func forgetAllPairedClients() {
+        PairingStore().revokeAll()
+    }
 }
 #endif

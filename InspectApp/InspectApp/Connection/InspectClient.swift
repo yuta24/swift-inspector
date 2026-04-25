@@ -119,11 +119,13 @@ final class InspectClient {
                         switch message {
                         case .handshake(let h):
                             logger.info("Client decoded handshake: \(h.deviceName, privacy: .public)")
+                        case .pairResult(let outcome):
+                            logger.info("Client decoded pairResult: \(String(describing: outcome), privacy: .public)")
                         case .hierarchy(let roots):
                             logger.info("Client decoded hierarchy: \(roots.count) root(s)")
                         case .error(let msg):
                             logger.error("Client received error message: \(msg, privacy: .public)")
-                        case .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates:
+                        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates:
                             logger.debug("Client received request/subscribe message (unexpected)")
                         case .highlightView:
                             logger.debug("Client received highlightView (unexpected)")
