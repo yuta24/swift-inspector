@@ -35,6 +35,7 @@ struct InspectAppMain: App {
                 if let viewModel = updater?.viewModel {
                     CheckForUpdatesView(viewModel: viewModel)
                 }
+                ReenableCrashNotificationsView(presenter: crashPresenter)
             }
         }
     }
@@ -100,6 +101,26 @@ private struct CheckForUpdatesView: View {
             viewModel.checkForUpdates()
         }
         .disabled(!viewModel.canCheckForUpdates)
+    }
+}
+
+// MARK: - Re-enable Crash Notifications Menu Item
+
+/// Recovery affordance for users who hit "クラッシュ通知をオフにする" on
+/// the crash report sheet and later want notifications back. Always
+/// visible in the menu so it's discoverable, disabled when notifications
+/// are already on.
+private struct ReenableCrashNotificationsView: View {
+    @ObservedObject var presenter: CrashReportPresenter
+
+    var body: some View {
+        Button("クラッシュ通知を再度オンにする") {
+            presenter.reenable()
+        }
+        .disabled(!presenter.isSuppressed)
+        .help(presenter.isSuppressed
+              ? "クラッシュ通知を再び有効にし、未確認のレポートがあれば即時表示します"
+              : "クラッシュ通知は現在有効です")
     }
 }
 

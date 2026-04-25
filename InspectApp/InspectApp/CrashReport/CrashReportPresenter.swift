@@ -10,6 +10,10 @@ private let logger = Logger(subsystem: "swift-inspector", category: "crash-prese
 @MainActor
 final class CrashReportPresenter: ObservableObject {
     @Published private(set) var pendingReports: [CrashReport] = []
+    /// Mirrors the `suppressed` flag in UserDefaults. Published so the
+    /// "Re-enable crash notifications" menu item can react to changes
+    /// without polling.
+    @Published private(set) var isSuppressed: Bool
 
     private let defaults: UserDefaults
     private let processName: String
@@ -32,10 +36,11 @@ final class CrashReportPresenter: ObservableObject {
         self.bundleID = bundleID
         self.repositoryURL = repositoryURL
         self.directoryOverride = directoryOverride
+        self.isSuppressed = defaults.bool(forKey: Self.suppressedKey)
     }
 
     func scanOnLaunch() {
-        if defaults.bool(forKey: Self.suppressedKey) { return }
+        if isSuppressed { return }
         let since = lastScanDate ?? installSeed()
         let reports = CrashReportScanner.scan(
             bundleID: bundleID,
@@ -57,8 +62,20 @@ final class CrashReportPresenter: ObservableObject {
         defaults.set(Date(), forKey: Self.lastScanKey)
         if suppressForever {
             defaults.set(true, forKey: Self.suppressedKey)
+            isSuppressed = true
         }
         pendingReports = []
+    }
+
+    /// Clears the suppressed flag and re-runs the scan immediately, so a
+    /// crash that happened while notifications were off can still surface
+    /// without waiting for a relaunch. No-op when notifications are
+    /// already enabled.
+    func reenable() {
+        guard isSuppressed else { return }
+        defaults.removeObject(forKey: Self.suppressedKey)
+        isSuppressed = false
+        scanOnLaunch()
     }
 
     /// Pre-fills a GitHub Issue with a short summary. The full report is

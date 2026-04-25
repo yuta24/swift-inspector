@@ -92,6 +92,7 @@ final class CrashReportPresenterTests: XCTestCase {
     func test_suppress_forever_disables_subsequent_scans() throws {
         let presenter = makePresenter()
         presenter.dismiss(suppressForever: true)
+        XCTAssertTrue(presenter.isSuppressed)
 
         try writeIPS(
             named: "InspectApp-2099-01-01-090000.ips",
@@ -99,10 +100,46 @@ final class CrashReportPresenterTests: XCTestCase {
         )
 
         let next = makePresenter()
+        XCTAssertTrue(next.isSuppressed, "isSuppressed should hydrate from defaults")
         next.scanOnLaunch()
 
         XCTAssertTrue(next.pendingReports.isEmpty,
                       "suppressed flag should short-circuit scanning entirely")
+    }
+
+    func test_reenable_clears_flag_and_surfaces_pending_crashes() throws {
+        // User suppressed earlier and a crash arrived in the meantime.
+        defaults.set(Date.distantPast, forKey: "CrashReportPresenter.lastScanDate")
+        defaults.set(true, forKey: "CrashReportPresenter.suppressed")
+        let report = try writeIPS(
+            named: "InspectApp-2099-01-01-090000.ips",
+            timestamp: "2099-01-01 09:00:00.00 +0900"
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(60)],
+            ofItemAtPath: report.path
+        )
+
+        let presenter = makePresenter()
+        XCTAssertTrue(presenter.isSuppressed)
+        presenter.scanOnLaunch()
+        XCTAssertTrue(presenter.pendingReports.isEmpty,
+                      "scan should be suppressed before reenable")
+
+        presenter.reenable()
+
+        XCTAssertFalse(presenter.isSuppressed)
+        XCTAssertNil(defaults.object(forKey: "CrashReportPresenter.suppressed"))
+        XCTAssertEqual(presenter.pendingReports.count, 1,
+                       "reenable should immediately surface pending crashes")
+    }
+
+    func test_reenable_is_noop_when_not_suppressed() {
+        let presenter = makePresenter()
+        XCTAssertFalse(presenter.isSuppressed)
+        presenter.reenable()
+        XCTAssertFalse(presenter.isSuppressed)
+        XCTAssertTrue(presenter.pendingReports.isEmpty)
     }
 
     func test_issueURL_includes_required_query_items() throws {
