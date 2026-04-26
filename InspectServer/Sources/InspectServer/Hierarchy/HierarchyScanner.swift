@@ -75,6 +75,23 @@ public enum HierarchyScanner {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// Whether the node has any visible footprint at all. Used to skip both
+    /// screenshot paths when there's nothing to capture. `isHidden` is
+    /// intentionally NOT checked here — a hidden view's group screenshot is
+    /// still useless (windowCapture doesn't include it), but its solo
+    /// screenshot is the only way an inspector user can see what the view
+    /// actually contains. Hidden-aware skip is applied per-path below.
+    private static func shouldCaptureScreenshot(
+        alpha: CGFloat,
+        windowFrame: CGRect,
+        viewport: CGRect
+    ) -> Bool {
+        if alpha < 0.01 { return false }
+        if windowFrame.width < 1 || windowFrame.height < 1 { return false }
+        if !windowFrame.intersects(viewport) { return false }
+        return true
+    }
+
     /// `String(describing: type(of: x))` allocates a new Swift String on every
     /// call (it walks the type metadata to format the demangled name). At ~1k
     /// nodes per capture × 2 calls per node that adds ~1ms of pure metadata
@@ -111,24 +128,49 @@ public enum HierarchyScanner {
             selfToWindow = layerChainToWindow(view.layer, window: window)
         }
 
+        // Compute geometry up-front so screenshot culling can read windowFrame
+        // without doing the work twice.
+        let b = view.bounds
+        let cornersInWindow: [CGPoint] = [
+            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
+        ]
+        let windowFrame = aabb(of: cornersInWindow)
+
         let groupScreenshot: Data?
         let soloScreenshot: Data?
 
-        if captureScreenshots {
-            // Group screenshot: crop from window capture (includes subviews)
-            if let (windowImage, scale) = windowCapture {
-                groupScreenshot = ScreenshotCapture.crop(
+        if captureScreenshots && Self.shouldCaptureScreenshot(
+            alpha: view.alpha,
+            windowFrame: windowFrame,
+            viewport: window.bounds
+        ) {
+            // Group screenshot: crop from the pre-captured window image.
+            // We already have the window-space rect, so call cropImpl directly
+            // to skip the redundant `view.convert` inside ScreenshotCapture.crop.
+            // Hidden views aren't drawn into windowCapture, so the crop would
+            // just expose whatever is behind them — emit nil instead.
+            if let (windowImage, scale) = windowCapture, !view.isHidden {
+                groupScreenshot = ScreenshotCapture.cropImpl(
                     from: windowImage,
                     scale: scale,
-                    view: view,
-                    window: window
+                    rectInWindow: windowFrame,
+                    compressionQuality: ScreenshotCapture.jpegQuality
                 )
             } else {
                 groupScreenshot = nil
             }
 
-            // Solo screenshot: this layer only, sublayers hidden
-            soloScreenshot = ScreenshotCapture.soloScreenshot(of: view)
+            // Solo is "this view with sublayers hidden". For a visible leaf
+            // (no subviews, no sublayers, not isHidden) it's byte-identical
+            // to group, so skip the per-view CALayer.render. A *hidden* leaf
+            // still needs solo — that's the only way the inspector can show
+            // what's inside a view that doesn't appear in the window image.
+            let isLeaf = view.subviews.isEmpty && (view.layer.sublayers ?? []).isEmpty
+            let canSkipSolo = isLeaf && !view.isHidden
+            soloScreenshot = canSkipSolo ? nil : ScreenshotCapture.soloScreenshot(of: view)
         } else {
             groupScreenshot = nil
             soloScreenshot = nil
@@ -197,20 +239,6 @@ public enum HierarchyScanner {
 
         let constraints = Self.extractConstraints(from: view)
 
-        // Four corners of bounds in window space — preserves enough 2D
-        // affine information for a future renderer to rotate/skew planes.
-        let b = view.bounds
-        let cornersInWindow: [CGPoint] = [
-            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
-            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
-            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
-            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
-        ]
-
-        // Absolute AABB in window coordinates — derived from the corners
-        // we just computed (matches what `view.convert(rect:to:)` returns).
-        let windowFrame = aabb(of: cornersInWindow)
-
         return ViewNode(
             ident: nodeIdent,
             className: Self.className(of: view),
@@ -256,21 +284,39 @@ public enum HierarchyScanner {
             selfToWindow = layerChainToWindow(layer, window: window)
         }
 
+        // Compute geometry up-front so screenshot culling can read windowFrame.
+        let b = layer.bounds
+        let cornersInWindow: [CGPoint] = [
+            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
+        ]
+        let windowFrame = aabb(of: cornersInWindow)
+
         let groupScreenshot: Data?
         let soloScreenshot: Data?
 
-        if captureScreenshots {
-            if let (windowImage, scale) = windowCapture {
-                groupScreenshot = ScreenshotCapture.cropLayer(
+        if captureScreenshots && Self.shouldCaptureScreenshot(
+            alpha: CGFloat(layer.opacity),
+            windowFrame: windowFrame,
+            viewport: window.bounds
+        ) {
+            if let (windowImage, scale) = windowCapture, !layer.isHidden {
+                groupScreenshot = ScreenshotCapture.cropImpl(
                     from: windowImage,
                     scale: scale,
-                    layer: layer,
-                    window: window
+                    rectInWindow: windowFrame,
+                    compressionQuality: ScreenshotCapture.jpegQuality
                 )
             } else {
                 groupScreenshot = nil
             }
-            soloScreenshot = ScreenshotCapture.soloScreenshotOfLayer(layer)
+            // See UIView branch: leaf layers can reuse group, except hidden
+            // ones (which aren't in windowCapture).
+            let isLeaf = (layer.sublayers ?? []).isEmpty
+            let canSkipSolo = isLeaf && !layer.isHidden
+            soloScreenshot = canSkipSolo ? nil : ScreenshotCapture.soloScreenshotOfLayer(layer)
         } else {
             groupScreenshot = nil
             soloScreenshot = nil
@@ -311,15 +357,6 @@ public enum HierarchyScanner {
         let typography = Self.extractTypography(fromLayer: layer)
 
         let nodeIdent = UUID()
-
-        let b = layer.bounds
-        let cornersInWindow: [CGPoint] = [
-            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
-            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
-            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
-            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
-        ]
-        let windowFrame = aabb(of: cornersInWindow)
 
         return ViewNode(
             ident: nodeIdent,

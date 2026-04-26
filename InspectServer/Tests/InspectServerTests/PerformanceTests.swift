@@ -199,6 +199,25 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
+    /// End-to-end cost of buildNode with screenshots enabled. The previous
+    /// "no screenshots" baseline measures structure walking only; this one
+    /// catches the dominant cost path (per-node crop + solo screenshot)
+    /// that runs in real captures.
+    func test_perf_buildNode_mediumTree_withScreenshots() {
+        let (window, root) = buildWideTree(branching: 6, depth: 4)
+        let windowCapture = ScreenshotCapture.captureWindow(window)
+        XCTAssertNotNil(windowCapture)
+        measure {
+            ViewIdentRegistry.shared.clear()
+            _ = HierarchyScanner.buildNode(
+                from: root,
+                window: window,
+                windowCapture: windowCapture,
+                captureScreenshots: true
+            )
+        }
+    }
+
     /// Cropping cost should scale with output bytes, not source image size —
     /// guards against accidentally re-encoding the whole window per crop.
     func test_perf_screenshotCrop() {

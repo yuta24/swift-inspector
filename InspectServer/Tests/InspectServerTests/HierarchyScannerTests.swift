@@ -301,6 +301,36 @@ final class HierarchyScannerTests: XCTestCase {
         return nil
     }
 
+    /// Hidden views don't appear in the windowCapture, so the group crop is
+    /// useless — but the inspector still wants to show what's inside them
+    /// (designers select hidden nodes from the tree to check their contents).
+    /// soloScreenshot uses `CALayer.render(in:)`, which honors the layer's
+    /// own contents regardless of `isHidden`, so it must be emitted.
+    func test_buildNode_hiddenLeafStillEmitsSoloScreenshot() {
+        let window = makeWindow(size: CGSize(width: 200, height: 200))
+        let view = UIView(frame: CGRect(x: 10, y: 10, width: 50, height: 50))
+        view.backgroundColor = .red
+        view.isHidden = true
+        window.addSubview(view)
+
+        let windowCapture = ScreenshotCapture.captureWindow(window)
+        ViewIdentRegistry.shared.clear()
+        let windowNode = HierarchyScanner.buildNode(
+            from: window,
+            window: window,
+            windowCapture: windowCapture,
+            captureScreenshots: true,
+            depth: 0
+        )
+        let viewNode = windowNode.children.first
+        XCTAssertNotNil(viewNode)
+        // Group screenshot: nil — windowCapture didn't see the hidden view.
+        XCTAssertNil(viewNode?.screenshot)
+        // Solo screenshot: present — that's the inspector's only window into
+        // hidden content.
+        XCTAssertNotNil(viewNode?.soloScreenshot)
+    }
+
     /// A rotated view: 2D affine. UIKit rotates around the layer's
     /// `position`/`anchorPoint`; our chain has to match.
     func test_buildNode_cornersUnderRotationMatchUIKit() {
