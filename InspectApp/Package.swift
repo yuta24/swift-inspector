@@ -12,7 +12,9 @@ let package = Package(
         .macOS(.v14),
     ],
     dependencies: [
-        .package(path: "../InspectCore"),
+        // Points at the unified library Package.swift at repo root.
+        // Sparkle stays out of that package — it's macOS-client-only.
+        .package(name: "swift-inspector", path: ".."),
         // Pinned to 2.9.x. Patch updates pick up Sparkle's security fixes;
         // a minor bump (e.g. 2.10) goes through manual verification because
         // the codesign / sign_update layout has shifted between releases.
@@ -22,7 +24,7 @@ let package = Package(
         .executableTarget(
             name: "InspectApp",
             dependencies: [
-                .product(name: "InspectCore", package: "InspectCore"),
+                .product(name: "InspectCore", package: "swift-inspector"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "InspectApp",
