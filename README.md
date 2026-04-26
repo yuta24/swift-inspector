@@ -205,3 +205,29 @@ The workflow builds the `.app`, codesigns and notarizes it, signs the
 archive with the EdDSA key, uploads it as a Release asset, and updates
 `appcast.xml` on `gh-pages`. Running clients pick up the new version on
 their next launch or manual check.
+
+## Acknowledgments
+
+The split-process design (small server SDK linked into the host iOS
+app, separate native client over Bonjour) is directly inspired by
+[**LookinServer**](https://github.com/QMUI/LookinServer) — the
+underlying architectural shape, the service-on-iOS / inspector-on-macOS
+split, and the live update flow all owe a clear debt to that project.
+If you need the broadest feature surface and don't mind an
+Objective-C-first SDK, LookinServer is the more mature choice.
+
+swift-inspector exists in that space because we wanted:
+
+- A **Swift-native, Swift-Package-Manager-only** integration with no
+  Objective-C runtime or CocoaPods baggage.
+- A **designer-first** macOS client — 3D scene navigation, live
+  hierarchy diff, reduced jargon — instead of an engineer-first one.
+- Tight scope: only what's needed for a designer / QA reviewing builds
+  on a real device, not a full debugger replacement.
+
+Other projects in the same space worth knowing about: [Reveal][reveal]
+(commercial), [FLEX][flex] (in-app overlay, no companion app), and the
+runtime view debugger built into Xcode itself.
+
+[reveal]: https://revealapp.com
+[flex]: https://github.com/flipboard/FLEX
