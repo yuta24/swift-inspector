@@ -39,6 +39,31 @@ unless either `DEBUG` or `SWIFT_INSPECTOR_ENABLED` is defined — without
 the guard, Release builds would fail with "Cannot find 'InspectServer'
 in scope".
 
+### Info.plist requirements
+
+iOS requires apps that publish or browse Bonjour services to declare
+them in `Info.plist`. Without these keys, `InspectServer.start()` will
+succeed but the device will never be advertised on the network — a silent
+failure that's easy to miss. Add to your app's `Info.plist`:
+
+```xml
+<key>NSBonjourServices</key>
+<array>
+    <string>_swift-inspector._tcp</string>
+</array>
+<key>NSLocalNetworkUsageDescription</key>
+<string>Allows runtime UI inspection from a paired Mac on the same Wi-Fi network. Only used in internal builds.</string>
+```
+
+The string under `NSLocalNetworkUsageDescription` is shown to the user
+in the Local Network permission prompt the first time the app starts
+the listener — write something your designers / QA team will recognize.
+
+If you only ship the inspector to internal builds (recommended — see
+the privacy section below), you can scope these keys to those
+configurations only by maintaining separate `Info.plist` files or by
+using build settings to inject them conditionally.
+
 ## Build configurations
 
 `InspectServer` is gated by a compile-time flag so that reflection,
