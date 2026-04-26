@@ -114,9 +114,9 @@ private struct ActivityIndicator: View {
     }
 
     private var tooltip: String {
-        if isConnecting { return "Connecting…" }
-        if isAwaitingPair { return "デバイス側で承認待ち…" }
-        return "Capturing hierarchy…"
+        if isConnecting { return String(localized: "Connecting…") }
+        if isAwaitingPair { return String(localized: "Awaiting approval on the device…") }
+        return String(localized: "Capturing hierarchy…")
     }
 }
 
@@ -138,7 +138,8 @@ private struct LiveToolbarControl: View {
                         model.setLiveInterval(interval)
                     } label: {
                         HStack {
-                            Text("\(String(format: "%.1f", interval))s")
+                            // Verbatim — the formatted number is data, not UI copy.
+                            Text(verbatim: "\(String(format: "%.1f", interval))s")
                             if model.liveInterval == interval {
                                 Image(systemName: "checkmark")
                             }
@@ -179,15 +180,17 @@ private struct LiveToolbarControl: View {
 
     private var helpText: String {
         guard model.isLiveMode else {
-            return "Start auto-refreshing the hierarchy"
+            return String(localized: "Start auto-refreshing the hierarchy")
         }
-        let transport: String
+        let interval = String(format: "%.1f", model.liveInterval)
         switch model.liveTransport {
-        case .push: transport = " via server push"
-        case .poll: transport = " via client polling"
-        case .none: transport = ""
+        case .push:
+            return String(localized: "Auto-refreshing every \(interval)s via server push — click to pause")
+        case .poll:
+            return String(localized: "Auto-refreshing every \(interval)s via client polling — click to pause")
+        case .none:
+            return String(localized: "Auto-refreshing every \(interval)s — click to pause")
         }
-        return "Auto-refreshing every \(String(format: "%.1f", model.liveInterval))s\(transport) — click to pause"
     }
 }
 
@@ -261,7 +264,7 @@ private struct FocusBar: View {
             Text("Focused on")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(node.className)
+            Text(verbatim: node.className)
                 .font(.caption.monospaced())
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -328,7 +331,8 @@ private struct DevicePickerBar: View {
                     Text("No Device")
                         .tag(nil as String?)
                     ForEach(model.discovered) { endpoint in
-                        Text(endpoint.name)
+                        // Verbatim — endpoint name is data (Bonjour service name).
+                        Text(verbatim: endpoint.name)
                             .tag(endpoint.id as String?)
                     }
                 }
@@ -514,19 +518,19 @@ private struct ConnectionActionButton: View {
 
     private func tooltip(for action: Action) -> String {
         switch action {
-        case .connect: return "Connect to the selected device"
-        case .cancel: return "Cancel this connection attempt"
-        case .disconnect: return "Disconnect"
+        case .connect: return String(localized: "Connect to the selected device")
+        case .cancel: return String(localized: "Cancel this connection attempt")
+        case .disconnect: return String(localized: "Disconnect")
         case .switchDevice:
             let name = model.discovered
                 .first(where: { $0.id == model.selectedEndpointID })?.name
-                ?? "the selected device"
-            return "Disconnect and connect to \(name)"
+                ?? String(localized: "the selected device")
+            return String(localized: "Disconnect and connect to \(name)")
         case .retry:
             if let error = model.connectionError {
-                return "Retry — last attempt failed: \(error)"
+                return String(localized: "Retry — last attempt failed: \(error)")
             }
-            return "Retry the connection"
+            return String(localized: "Retry the connection")
         }
     }
 }
@@ -892,7 +896,10 @@ private struct TypePropertiesSection: View {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(properties.keys.sorted(), id: \.self) { key in
                         HStack(spacing: 8) {
-                            PropertyLabel(key)
+                            // Property keys are runtime-derived UIKit names
+                            // (`isHidden`, `clipsToBounds`, etc.); they're
+                            // identifiers, not user-facing copy.
+                            PropertyLabel(verbatim: key)
                             PropertyValue(properties[key] ?? "")
                         }
                     }
@@ -1000,13 +1007,13 @@ private struct MeasurementSection: View {
             Button {
                 onNavigate(compare.id)
             } label: {
-                Text(compare.className)
+                Text(verbatim: compare.className)
                     .font(.caption.monospaced())
                     .foregroundStyle(.tint)
                     .lineLimit(1)
             }
             .buttonStyle(.plain)
-            .help("Jump to \(compare.className)")
+            .help(String(localized: "Jump to \(compare.className)"))
             Spacer(minLength: 4)
             if !isHoveringCompare {
                 Button {
@@ -1032,18 +1039,18 @@ private struct MeasurementRows: View {
                 "Δx",
                 value: measurement.horizontalGap,
                 descriptor: horizontalDescriptor,
-                zeroCaption: "overlapping x"
+                zeroCaption: String(localized: "overlapping x")
             )
             row(
                 "Δy",
                 value: measurement.verticalGap,
                 descriptor: verticalDescriptor,
-                zeroCaption: "overlapping y"
+                zeroCaption: String(localized: "overlapping y")
             )
             HStack(spacing: 8) {
                 PropertyLabel("Center")
                 PropertyValue(format(measurement.centerDistance))
-                Text("(Δ \(format(measurement.centerDelta.width)), \(format(measurement.centerDelta.height)))")
+                Text(verbatim: "(Δ \(format(measurement.centerDelta.width)), \(format(measurement.centerDelta.height)))")
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             }
@@ -1056,20 +1063,20 @@ private struct MeasurementRows: View {
 
     @ViewBuilder
     private func row(
-        _ label: String,
+        _ symbol: String,
         value: CGFloat,
         descriptor: String,
         zeroCaption: String
     ) -> some View {
         HStack(spacing: 8) {
-            PropertyLabel(label)
+            PropertyLabel(verbatim: symbol)
             PropertyValue(format(abs(value)))
             if value == 0 {
-                Text(zeroCaption)
+                Text(verbatim: zeroCaption)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
-                Text(descriptor)
+                Text(verbatim: descriptor)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -1077,13 +1084,15 @@ private struct MeasurementRows: View {
     }
 
     private var horizontalDescriptor: String {
-        measurement.horizontalGap > 0 ? "compare is right of selection"
-            : "compare is left of selection"
+        measurement.horizontalGap > 0
+            ? String(localized: "compare is right of selection")
+            : String(localized: "compare is left of selection")
     }
 
     private var verticalDescriptor: String {
-        measurement.verticalGap > 0 ? "compare is below selection"
-            : "compare is above selection"
+        measurement.verticalGap > 0
+            ? String(localized: "compare is below selection")
+            : String(localized: "compare is above selection")
     }
 
     private func format(_ v: CGFloat) -> String {
@@ -1093,11 +1102,11 @@ private struct MeasurementRows: View {
 
     private func describe(_ r: FrameMeasurement.Relationship) -> String {
         switch r {
-        case .disjoint: return "disjoint"
-        case .overlapping: return "overlapping"
-        case .targetInsideReference: return "compare is inside selection"
-        case .referenceInsideTarget: return "selection is inside compare"
-        case .identical: return "identical"
+        case .disjoint: return String(localized: "disjoint")
+        case .overlapping: return String(localized: "overlapping")
+        case .targetInsideReference: return String(localized: "compare is inside selection")
+        case .referenceInsideTarget: return String(localized: "selection is inside compare")
+        case .identical: return String(localized: "identical")
         }
     }
 }
@@ -1196,7 +1205,7 @@ private struct ConstraintRow: View {
                     .foregroundStyle(.tint)
             }
             .buttonStyle(.plain)
-            .help("Jump to \(name)")
+            .help(String(localized: "Jump to \(name)"))
         } else {
             Text(label)
                 .font(.caption.monospaced())
@@ -1270,7 +1279,11 @@ private struct TypographySection: View {
                 if let lines = typography.numberOfLines {
                     HStack(spacing: 8) {
                         PropertyLabel("numberOfLines")
-                        PropertyValue(lines == 0 ? "0 (unlimited)" : "\(lines)")
+                        PropertyValue(
+                            lines == 0
+                                ? String(localized: "0 (unlimited)")
+                                : "\(lines)"
+                        )
                     }
                 }
                 if typography.isBold || typography.isItalic {
@@ -1413,10 +1426,10 @@ private struct ColorSwatch: View {
 // MARK: - Helpers
 
 private struct SectionHeader: View {
-    let title: String
+    let title: LocalizedStringKey
     let icon: String
 
-    init(_ title: String, icon: String) {
+    init(_ title: LocalizedStringKey, icon: String) {
         self.title = title
         self.icon = icon
     }
@@ -1429,20 +1442,33 @@ private struct SectionHeader: View {
 }
 
 private struct PropertyLabel: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
+    private enum Source {
+        case localized(LocalizedStringKey)
+        case verbatim(String)
     }
+    private let source: Source
+
+    init(_ text: LocalizedStringKey) { self.source = .localized(text) }
+    /// Use for math symbols (Δx, Δy) and for runtime-derived labels that
+    /// are not user-facing copy — bypasses the localization table.
+    init(verbatim text: String) { self.source = .verbatim(text) }
 
     var body: some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(minWidth: 100, alignment: .leading)
+        Group {
+            switch source {
+            case .localized(let key): Text(key)
+            case .verbatim(let s): Text(verbatim: s)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(minWidth: 100, alignment: .leading)
     }
 }
 
+/// Property *values* are user data (text contents, frame numbers, identifiers,
+/// runtime API names like "isHidden") — they must NOT pass through the
+/// localization table. `Text(verbatim:)` keeps the string as-is.
 private struct PropertyValue: View {
     let text: String
 
@@ -1451,7 +1477,7 @@ private struct PropertyValue: View {
     }
 
     var body: some View {
-        Text(text)
+        Text(verbatim: text)
             .font(.system(.callout, design: .monospaced))
             .textSelection(.enabled)
     }

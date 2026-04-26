@@ -423,6 +423,22 @@ final class InspectAppModel: ObservableObject {
         client?.send(.highlightView(ident: nil))
     }
 
+    /// Sends the user's current capture preferences to the connected server.
+    /// No-op when the server is too old to understand the message (protocol
+    /// < 5) — those servers would reject it at decode time and surface an
+    /// error in the status bar. Safe to call any time after pair approval;
+    /// each call replaces the server-side options wholesale.
+    func sendCurrentOptionsIfSupported() {
+        guard let version = serverProtocolVersion,
+              version >= InspectProtocol.optionsMinVersion else {
+            return
+        }
+        let options = InspectMessage.SnapshotOptions(
+            screenshotJPEGQuality: UserPreferences.screenshotJPEGQuality
+        )
+        client?.send(.setOptions(options))
+    }
+
     private func handle(_ message: InspectMessage) {
         switch message {
         case let .handshake(handshake):
@@ -443,7 +459,7 @@ final class InspectAppModel: ObservableObject {
             isInflight = false
             inflightSentAt = nil
             status = "error: \(message)"
-        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView:
+        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView, .setOptions:
             break
         }
     }
@@ -456,7 +472,7 @@ final class InspectAppModel: ObservableObject {
     private func beginPairingIfNeeded(for handshake: InspectMessage.Handshake) {
         if handshake.protocolVersion >= InspectProtocol.pairingMinVersion {
             isAwaitingPairApproval = true
-            status = "デバイス側で接続を承認してください…"
+            status = String(localized: "Approve the connection on the device…")
             let identity = ClientIdentityStore.current()
             client?.send(.requestPair(identity))
             schedulePairTimeout(for: client)
@@ -472,6 +488,7 @@ final class InspectAppModel: ObservableObject {
         case .approved:
             logger.info("Pair approved")
             status = "connected: \(connectedDeviceName)"
+            sendCurrentOptionsIfSupported()
             requestHierarchy()
         case let .rejected(reason):
             logger.info("Pair rejected: \(reason, privacy: .public)")
@@ -495,7 +512,7 @@ final class InspectAppModel: ObservableObject {
             guard let self, let client, self.client === client else { return }
             guard self.isAwaitingPairApproval else { return }
             self.isAwaitingPairApproval = false
-            self.connectionError = "デバイス側で承認されませんでした（タイムアウト）"
+            self.connectionError = String(localized: "Device did not approve in time")
             self.status = "pair timeout"
             self.disconnect()
         }

@@ -4,6 +4,14 @@ import InspectCore
 
 @MainActor
 public enum HierarchyScanner {
+    /// Hard cap on recursion depth. Real UIKit hierarchies very rarely exceed
+    /// ~50 levels; anything past this is almost certainly pathological (e.g.
+    /// a custom container that re-parents itself), and recursing further
+    /// risks a stack overflow inside `view.convert` / `layer.render`.
+    /// When the cap is hit we return the current node with `children = []`
+    /// and a `_truncated` marker in `properties` so the client can surface it.
+    public static let maxDepth = 200
+
     public static func captureAllWindows(captureScreenshots: Bool = true) -> [ViewNode] {
         ViewIdentRegistry.shared.clear()
 
@@ -23,7 +31,8 @@ public enum HierarchyScanner {
                 from: window,
                 window: window,
                 windowCapture: windowCapture,
-                captureScreenshots: captureScreenshots
+                captureScreenshots: captureScreenshots,
+                depth: 0
             )
         }
     }
@@ -32,7 +41,8 @@ public enum HierarchyScanner {
         from view: UIView,
         window: UIWindow,
         windowCapture: (CGImage, CGFloat)?,
-        captureScreenshots: Bool
+        captureScreenshots: Bool,
+        depth: Int = 0
     ) -> ViewNode {
         let groupScreenshot: Data?
         let soloScreenshot: Data?
@@ -65,27 +75,38 @@ public enum HierarchyScanner {
         // Collect backing layers of subviews so we can skip them when scanning sublayers
         let subviewLayerIdentifiers = Set(view.subviews.map { ObjectIdentifier($0.layer) })
 
-        // UIView children
-        var children = view.subviews.map {
-            buildNode(
-                from: $0,
-                window: window,
-                windowCapture: windowCapture,
-                captureScreenshots: captureScreenshots
-            )
-        }
+        var children: [ViewNode] = []
+        var truncated = false
 
-        // CALayer children (sublayers not backed by any subview)
-        for sublayer in view.layer.sublayers ?? [] {
-            if subviewLayerIdentifiers.contains(ObjectIdentifier(sublayer)) {
-                continue
+        if depth >= maxDepth {
+            // Drop children entirely; mark via properties so the client can hint
+            truncated = (view.subviews.isEmpty == false)
+                || ((view.layer.sublayers ?? []).contains { !subviewLayerIdentifiers.contains(ObjectIdentifier($0)) })
+        } else {
+            // UIView children
+            children = view.subviews.map {
+                buildNode(
+                    from: $0,
+                    window: window,
+                    windowCapture: windowCapture,
+                    captureScreenshots: captureScreenshots,
+                    depth: depth + 1
+                )
             }
-            children.append(buildNode(
-                fromLayer: sublayer,
-                window: window,
-                windowCapture: windowCapture,
-                captureScreenshots: captureScreenshots
-            ))
+
+            // CALayer children (sublayers not backed by any subview)
+            for sublayer in view.layer.sublayers ?? [] {
+                if subviewLayerIdentifiers.contains(ObjectIdentifier(sublayer)) {
+                    continue
+                }
+                children.append(buildNode(
+                    fromLayer: sublayer,
+                    window: window,
+                    windowCapture: windowCapture,
+                    captureScreenshots: captureScreenshots,
+                    depth: depth + 1
+                ))
+            }
         }
 
         let accID = view.accessibilityIdentifier?.isEmpty == false ? view.accessibilityIdentifier : nil
@@ -98,7 +119,10 @@ public enum HierarchyScanner {
 
         let isEnabled: Bool? = (view as? UIControl)?.isEnabled
 
-        let properties = Self.extractProperties(from: view)
+        var properties = Self.extractProperties(from: view)
+        if truncated {
+            properties["_truncated"] = "depth>=\(maxDepth)"
+        }
 
         let typography = Self.extractTypography(from: view)
 
@@ -152,7 +176,8 @@ public enum HierarchyScanner {
         fromLayer layer: CALayer,
         window: UIWindow,
         windowCapture: (CGImage, CGFloat)?,
-        captureScreenshots: Bool
+        captureScreenshots: Bool,
+        depth: Int = 0
     ) -> ViewNode {
         let groupScreenshot: Data?
         let soloScreenshot: Data?
@@ -174,14 +199,23 @@ public enum HierarchyScanner {
             soloScreenshot = nil
         }
 
-        // Recurse into sublayers
-        let children = (layer.sublayers ?? []).map {
-            buildNode(
-                fromLayer: $0,
-                window: window,
-                windowCapture: windowCapture,
-                captureScreenshots: captureScreenshots
-            )
+        // Recurse into sublayers (respecting depth cap)
+        let children: [ViewNode]
+        let truncated: Bool
+        if depth >= maxDepth {
+            children = []
+            truncated = (layer.sublayers ?? []).isEmpty == false
+        } else {
+            children = (layer.sublayers ?? []).map {
+                buildNode(
+                    fromLayer: $0,
+                    window: window,
+                    windowCapture: windowCapture,
+                    captureScreenshots: captureScreenshots,
+                    depth: depth + 1
+                )
+            }
+            truncated = false
         }
 
         let backgroundColor = layer.backgroundColor
@@ -191,7 +225,10 @@ public enum HierarchyScanner {
             .flatMap { UIColor(cgColor: $0) }
             .flatMap(RGBAColor.init(uiColor:))
 
-        let properties = Self.extractLayerProperties(from: layer)
+        var properties = Self.extractLayerProperties(from: layer)
+        if truncated {
+            properties["_truncated"] = "depth>=\(maxDepth)"
+        }
 
         let typography = Self.extractTypography(fromLayer: layer)
 

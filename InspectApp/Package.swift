@@ -3,6 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "InspectApp",
+    // The source-language strings in `Text("Connect")` etc. are English, so
+    // English is the development region. `ja` is provided as a translation
+    // via `Resources/Localizable.xcstrings`. Without `defaultLocalization`
+    // SwiftPM will not process the catalog or expose other lprojs at runtime.
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
     ],
@@ -24,6 +29,9 @@ let package = Package(
             exclude: [
                 "Assets.xcassets",
                 "Preview Content",
+            ],
+            resources: [
+                .process("Resources"),
             ]
         ),
         .testTarget(

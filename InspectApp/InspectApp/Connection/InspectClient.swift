@@ -125,7 +125,7 @@ final class InspectClient {
                             logger.info("Client decoded hierarchy: \(roots.count) root(s)")
                         case .error(let msg):
                             logger.error("Client received error message: \(msg, privacy: .public)")
-                        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates:
+                        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .setOptions:
                             logger.debug("Client received request/subscribe message (unexpected)")
                         case .highlightView:
                             logger.debug("Client received highlightView (unexpected)")

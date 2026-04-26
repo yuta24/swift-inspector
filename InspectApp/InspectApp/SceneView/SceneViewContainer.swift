@@ -166,6 +166,16 @@ private struct BuildInfo {
     let absoluteOrigin: CGPoint
     let size: CGSize
     let isSelected: Bool
+    /// Center of the rendered plane in window coordinates, set only when the
+    /// node has a non-identity 2D transform (rotation/skew detectable from
+    /// `cornersInWindow`). When non-nil it overrides the
+    /// `absoluteOrigin + size/2` derivation in `scenePosition` so the plane
+    /// lands where UIKit actually drew the rotated rect.
+    let rotatedCenterInWindow: CGPoint?
+    /// Z rotation in radians, in SceneKit convention (Y-up, so a screen-space
+    /// clockwise rotation becomes a negative value here). Zero for
+    /// axis-aligned nodes.
+    let rotationZ: Float
 }
 
 // MARK: - NSViewRepresentable
@@ -451,6 +461,50 @@ private struct SceneKitView: NSViewRepresentable {
     /// which keeps scroll offsets (= parent `bounds.origin`) explicit and
     /// avoids relying on a server-side AABB that drifts under non-identity
     /// transforms.
+
+    /// Result of decoding `cornersInWindow` for a rotated/skewed view.
+    /// `centerInWindow` is the geometric center of the rotated rect (used as
+    /// the SCNNode position), `size` are the unrotated edge lengths (used as
+    /// the SCNPlane dimensions), and `rotationZ` is the angle in SceneKit
+    /// convention (Y-up, so signs are flipped from screen-space).
+    fileprivate struct CornerTransform {
+        let centerInWindow: CGPoint
+        let size: CGSize
+        let rotationZ: Float
+    }
+
+    /// Returns nil for axis-aligned rectangles or for missing/degenerate
+    /// corner data — in those cases the existing AABB walk is the right
+    /// answer. Returns a `CornerTransform` for rotated rects so the renderer
+    /// can place a rotated SCNPlane on top of them.
+    fileprivate static func extractCornerTransform(corners: [CGPoint]?) -> CornerTransform? {
+        guard let corners, corners.count == 4 else { return nil }
+        let tl = corners[0], tr = corners[1], bl = corners[2], br = corners[3]
+        let xAxis = CGPoint(x: tr.x - tl.x, y: tr.y - tl.y)
+        let yAxis = CGPoint(x: bl.x - tl.x, y: bl.y - tl.y)
+        let width = hypot(xAxis.x, xAxis.y)
+        let height = hypot(yAxis.x, yAxis.y)
+        guard width >= 1, height >= 1 else { return nil }
+
+        // Screen-space angle of the rect's local +X axis. Atan2 returns
+        // 0 when the corners trace an axis-aligned rect, so we treat
+        // sub-degree noise as "no rotation" to avoid dragging every node
+        // through the rotated path on captures with float jitter.
+        let angleScreen = atan2(xAxis.y, xAxis.x)
+        if abs(angleScreen) < 0.01 { return nil }
+
+        let center = CGPoint(x: (tl.x + br.x) / 2, y: (tl.y + br.y) / 2)
+        return CornerTransform(
+            centerInWindow: center,
+            size: CGSize(width: width, height: height),
+            // SceneKit's Y-up means a clockwise screen rotation (positive
+            // angle in y-down coords) is a counter-clockwise rotation
+            // about Z in scene space — flip sign here so a UIKit
+            // `.rotated(by: .pi/4)` actually appears tilted right in the 3D view.
+            rotationZ: -Float(angleScreen)
+        )
+    }
+
     private func enumerateBuildInfos(roots: [ViewNode], screenArea: CGRect) -> [BuildInfo] {
         var infos: [BuildInfo] = []
         var traversalIndex = 0
@@ -522,14 +576,34 @@ private struct SceneKitView: NSViewRepresentable {
         let myIndex = traversalIndex
         traversalIndex += 1
 
+        // If the server captured a non-axis-aligned set of corners (i.e. the
+        // view has a CGAffineTransform applied), prefer them over the AABB
+        // walk — that's the only way to render rotated icons / cards
+        // correctly. Axis-aligned views fall back to nil and use the walk.
+        let cornerXform = Self.extractCornerTransform(corners: node.cornersInWindow)
+        let finalSize: CGSize
+        let rotatedCenter: CGPoint?
+        let rotationZ: Float
+        if let cornerXform {
+            finalSize = cornerXform.size
+            rotatedCenter = cornerXform.centerInWindow
+            rotationZ = cornerXform.rotationZ
+        } else {
+            finalSize = renderSize
+            rotatedCenter = nil
+            rotationZ = 0
+        }
+
         infos.append(BuildInfo(
             node: node,
             path: pathPrefix,
             depth: depth,
             traversalIndex: myIndex,
             absoluteOrigin: renderOrigin,
-            size: renderSize,
-            isSelected: node.id == selectedNodeID
+            size: finalSize,
+            isSelected: node.id == selectedNodeID,
+            rotatedCenterInWindow: rotatedCenter,
+            rotationZ: rotationZ
         ))
 
         let parentBounds = node.boundsOrigin
@@ -550,8 +624,20 @@ private struct SceneKitView: NSViewRepresentable {
     // MARK: - Container construction
 
     private func scenePosition(for info: BuildInfo, rootHeight: CGFloat) -> SCNVector3 {
-        let x = Float(info.absoluteOrigin.x + info.size.width / 2)
-        let y = Float(rootHeight - (info.absoluteOrigin.y + info.size.height / 2))
+        // Rotated nodes carry their own absolute center (computed from
+        // cornersInWindow) so the SCNPlane lands on top of the rotated rect.
+        // Axis-aligned nodes fall back to the AABB-derived center.
+        let centerX: CGFloat
+        let centerY: CGFloat
+        if let center = info.rotatedCenterInWindow {
+            centerX = center.x
+            centerY = center.y
+        } else {
+            centerX = info.absoluteOrigin.x + info.size.width / 2
+            centerY = info.absoluteOrigin.y + info.size.height / 2
+        }
+        let x = Float(centerX)
+        let y = Float(rootHeight - centerY)
         let z = layerSpacing * Float(info.depth) + Float(info.traversalIndex) * 0.01
         return SCNVector3(x, y, z)
     }
@@ -561,6 +647,11 @@ private struct SceneKitView: NSViewRepresentable {
         container.name = info.node.id.uuidString
         container.position = scenePosition(for: info, rootHeight: rootHeight)
         container.renderingOrder = info.traversalIndex
+        if info.rotationZ != 0 {
+            // `eulerAngles.z` is CGFloat on macOS / Float on iOS — convert
+            // through the type the property expects via `.init`.
+            container.eulerAngles.z = .init(info.rotationZ)
+        }
 
         let plane = SCNPlane(width: info.size.width, height: info.size.height)
         plane.materials = [makeMaterial(for: info.node)]
@@ -612,6 +703,9 @@ private struct SceneKitView: NSViewRepresentable {
         container.name = info.node.id.uuidString
         container.position = scenePosition(for: info, rootHeight: rootHeight)
         container.renderingOrder = info.traversalIndex
+        // Always write the rotation, including 0, so a previously-rotated
+        // node that goes back to identity actually un-rotates.
+        container.eulerAngles.z = .init(info.rotationZ)
 
         let sizeChanged = info.size.width != existing.width || info.size.height != existing.height
         let newTextureCount = textureByteCount(for: info.node)

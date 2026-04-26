@@ -2,6 +2,13 @@
 import UIKit
 
 public enum ScreenshotCapture {
+    /// JPEG compression quality used for group (and layer-group) screenshots.
+    /// Set by the listener whenever the client sends `setOptions`. The default
+    /// (0.7) is balanced for the device-→Mac wire — visibly fine, ~3× smaller
+    /// than 0.95. Allowed range is 0.1…1.0; values outside that are ignored
+    /// by the listener before they reach this point.
+    @MainActor public static var jpegQuality: CGFloat = 0.7
+
     /// Capture the entire window as a CGImage for cropping individual views.
     @MainActor
     public static func captureWindow(_ window: UIWindow) -> (CGImage, CGFloat)? {
@@ -24,21 +31,16 @@ public enum ScreenshotCapture {
         from windowImage: CGImage,
         scale: CGFloat,
         view: UIView,
-        window: UIWindow
+        window: UIWindow,
+        compressionQuality: CGFloat? = nil
     ) -> Data? {
         let rectInWindow = view.convert(view.bounds, to: window)
-        guard rectInWindow.width >= 1, rectInWindow.height >= 1 else { return nil }
-
-        let cropRect = CGRect(
-            x: rectInWindow.origin.x * scale,
-            y: rectInWindow.origin.y * scale,
-            width: rectInWindow.width * scale,
-            height: rectInWindow.height * scale
+        return cropImpl(
+            from: windowImage,
+            scale: scale,
+            rectInWindow: rectInWindow,
+            compressionQuality: compressionQuality ?? jpegQuality
         )
-
-        guard let cropped = windowImage.cropping(to: cropRect) else { return nil }
-        let uiImage = UIImage(cgImage: cropped, scale: scale, orientation: .up)
-        return uiImage.jpegData(compressionQuality: 0.7)
     }
 
     /// Capture only this layer's own content, hiding sublayers (solo screenshot).
@@ -86,21 +88,40 @@ public enum ScreenshotCapture {
         from windowImage: CGImage,
         scale: CGFloat,
         layer: CALayer,
-        window: UIWindow
+        window: UIWindow,
+        compressionQuality: CGFloat? = nil
     ) -> Data? {
         let rectInWindow = layer.convert(layer.bounds, to: window.layer)
+        return cropImpl(
+            from: windowImage,
+            scale: scale,
+            rectInWindow: rectInWindow,
+            compressionQuality: compressionQuality ?? jpegQuality
+        )
+    }
+
+    /// Shared crop logic with safe clamping. Pulled out so view/layer crops
+    /// stay in sync and unit tests can exercise the boundary math directly.
+    static func cropImpl(
+        from windowImage: CGImage,
+        scale: CGFloat,
+        rectInWindow: CGRect,
+        compressionQuality: CGFloat
+    ) -> Data? {
         guard rectInWindow.width >= 1, rectInWindow.height >= 1 else { return nil }
 
+        let imageBounds = CGRect(x: 0, y: 0, width: windowImage.width, height: windowImage.height)
         let cropRect = CGRect(
             x: rectInWindow.origin.x * scale,
             y: rectInWindow.origin.y * scale,
             width: rectInWindow.width * scale,
             height: rectInWindow.height * scale
-        )
+        ).integral.intersection(imageBounds)
+        guard cropRect.width >= 1, cropRect.height >= 1 else { return nil }
 
         guard let cropped = windowImage.cropping(to: cropRect) else { return nil }
         let uiImage = UIImage(cgImage: cropped, scale: scale, orientation: .up)
-        return uiImage.jpegData(compressionQuality: 0.7)
+        return uiImage.jpegData(compressionQuality: compressionQuality)
     }
 
     /// Capture a CALayer's own drawing with its sublayers hidden (solo screenshot).

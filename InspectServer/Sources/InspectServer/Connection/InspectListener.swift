@@ -228,6 +228,16 @@ public final class InspectListener {
             Task { @MainActor in
                 Self.applyHighlight(ident: ident)
             }
+        case .setOptions(let options):
+            logger.info("Received setOptions: jpegQuality=\(String(describing: options.screenshotJPEGQuality), privacy: .public)")
+            #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
+            Task { @MainActor in
+                if let q = options.screenshotJPEGQuality {
+                    let clamped = max(0.1, min(1.0, CGFloat(q)))
+                    ScreenshotCapture.jpegQuality = clamped
+                }
+            }
+            #endif
         case .requestPair, .pairResult, .handshake, .hierarchy, .error:
             logger.debug("Server ignoring message: \(String(describing: message).prefix(80), privacy: .public)")
             break

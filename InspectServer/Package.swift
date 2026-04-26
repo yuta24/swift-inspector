@@ -22,5 +22,15 @@ let package = Package(
                 .product(name: "DeviceKit", package: "DeviceKit"),
             ]
         ),
+        .testTarget(
+            name: "InspectServerTests",
+            dependencies: ["InspectServer"],
+            // The implementation files are gated by
+            // `(DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)`.
+            // Tests need the same gate so the symbols they exercise exist.
+            swiftSettings: [
+                .define("SWIFT_INSPECTOR_ENABLED")
+            ]
+        ),
     ]
 )

@@ -35,10 +35,10 @@ struct CrashReportSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)
-                Text("前回起動以降にクラッシュを検出しました")
+                Text("Crashes detected since last launch")
                     .font(.headline)
             }
-            Text("\(reports.count) 件のレポートが見つかりました。GitHub に共有していただけると修正に役立ちます。")
+            Text("\(reports.count) report(s) found. Sharing them on GitHub helps us fix issues.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -47,17 +47,17 @@ struct CrashReportSheet: View {
 
     private var footer: some View {
         HStack {
-            Button("クラッシュ通知をオフにする") {
+            Button("Turn off crash notifications") {
                 onSuppress()
             }
             .buttonStyle(.borderless)
-            .help("今後クラッシュが起きてもこのシートを出しません。再度有効にするには設定が必要です。")
+            .help("Suppress this sheet for future crashes. You can re-enable it from the menu.")
             Spacer()
-            Button("閉じる") {
+            Button("Close") {
                 onSkip()
             }
             .keyboardShortcut(.cancelAction)
-            .help("このシートを閉じます。今後クラッシュが起きたら再度通知します。")
+            .help("Dismiss this sheet. You will be notified again on future crashes.")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -83,10 +83,10 @@ private struct CrashReportCard: View {
                 Button {
                     onReport()
                 } label: {
-                    Label("GitHub で報告", systemImage: "arrow.up.right.square")
+                    Label("Report on GitHub", systemImage: "arrow.up.right.square")
                 }
                 .controlSize(.small)
-                .help("レポート全文をクリップボードにコピーし、ブラウザで Issue 作成画面を開きます")
+                .help("Copy the full report to the clipboard and open the new-issue page in your browser")
             }
             DisclosureGroup(isExpanded: $isExpanded) {
                 ScrollView {
@@ -100,7 +100,7 @@ private struct CrashReportCard: View {
                 .background(Color.secondary.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
             } label: {
-                Text(isExpanded ? "詳細を隠す" : "詳細を表示")
+                Text(isExpanded ? "Hide details" : "Show details")
                     .font(.caption)
             }
         }
@@ -112,12 +112,17 @@ private struct CrashReportCard: View {
     }
 
     private var headlineText: String {
-        report.exceptionType ?? "クラッシュ"
+        // Exception type comes from `.ips` payloads (e.g. "EXC_BAD_ACCESS") —
+        // raw symbolic data, not user copy. Use the localized fallback for
+        // missing values.
+        report.exceptionType ?? String(localized: "Crash")
     }
 
     private var subtitleText: String {
+        // Honour the user's current locale rather than pinning to ja_JP —
+        // RelativeDateTimeFormatter falls back to the current locale when
+        // none is set, which is what we want.
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
         let relative = formatter.localizedString(for: report.date, relativeTo: Date())
         if let version = report.appVersion {
             return "\(relative) · v\(version)"

@@ -38,6 +38,11 @@ struct InspectAppMain: App {
                 ReenableCrashNotificationsView(presenter: crashPresenter)
             }
         }
+
+        Settings {
+            PreferencesView()
+                .environmentObject(model)
+        }
     }
 }
 
@@ -97,7 +102,7 @@ private struct CheckForUpdatesView: View {
     @ObservedObject var viewModel: CheckForUpdatesViewModel
 
     var body: some View {
-        Button("アップデートを確認…") {
+        Button("Check for Updates…") {
             viewModel.checkForUpdates()
         }
         .disabled(!viewModel.canCheckForUpdates)
@@ -114,13 +119,13 @@ private struct ReenableCrashNotificationsView: View {
     @ObservedObject var presenter: CrashReportPresenter
 
     var body: some View {
-        Button("クラッシュ通知を再度オンにする") {
+        Button("Re-enable Crash Notifications") {
             presenter.reenable()
         }
         .disabled(!presenter.isSuppressed)
         .help(presenter.isSuppressed
-              ? "クラッシュ通知を再び有効にし、未確認のレポートがあれば即時表示します"
-              : "クラッシュ通知は現在有効です")
+              ? String(localized: "Re-enable crash notifications and surface any unseen reports immediately")
+              : String(localized: "Crash notifications are currently enabled"))
     }
 }
 

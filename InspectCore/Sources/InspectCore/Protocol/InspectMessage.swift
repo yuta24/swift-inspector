@@ -21,6 +21,10 @@ public enum InspectMessage: Codable, Sendable {
     /// mode in protocol v3+.
     case subscribeUpdates(intervalMs: Int)
     case unsubscribeUpdates
+    /// Client-supplied capture preferences. Sent once after pairing; persists
+    /// for the rest of the session. Older servers (protocol < 5) reject this
+    /// at decode time, so the client must gate by `InspectProtocol.optionsMinVersion`.
+    case setOptions(SnapshotOptions)
     case hierarchy(roots: [ViewNode])
     case highlightView(ident: UUID?)
     case error(String)
@@ -66,10 +70,24 @@ public enum InspectMessage: Codable, Sendable {
         /// reason is shown verbatim in the client's connection-error banner.
         case rejected(reason: String)
     }
+
+    /// Capture-quality knobs the client can override per session. Kept
+    /// minimal on purpose: every field is optional so the wire payload only
+    /// carries what the client actually wants to change, and additions in
+    /// future versions can decode against older clients without breaking.
+    public struct SnapshotOptions: Codable, Hashable, Sendable {
+        /// JPEG compression quality for group screenshots, 0.0–1.0. Higher
+        /// is sharper but bigger. Server default is 0.7.
+        public let screenshotJPEGQuality: Double?
+
+        public init(screenshotJPEGQuality: Double? = nil) {
+            self.screenshotJPEGQuality = screenshotJPEGQuality
+        }
+    }
 }
 
 public enum InspectProtocol {
-    public static let version: Int = 4
+    public static let version: Int = 5
     public static let bonjourServiceType: String = "_swift-inspector._tcp"
     /// Earliest server version that understands `subscribeUpdates`. Clients
     /// fall back to polling when connected to older servers.
@@ -78,4 +96,8 @@ public enum InspectProtocol {
     /// Clients connecting to older servers skip the pair step and start
     /// requesting hierarchies immediately for backward compatibility.
     public static let pairingMinVersion: Int = 4
+    /// Earliest server version that accepts `setOptions`. Older servers
+    /// would fail to decode the new case, so the client must skip sending
+    /// it when the handshake reports a lower version.
+    public static let optionsMinVersion: Int = 5
 }

@@ -86,26 +86,39 @@ final class CrashReportPresenter: ObservableObject {
             url: repositoryURL.appendingPathComponent("issues/new"),
             resolvingAgainstBaseURL: false
         )
+        // Issue title and body are written in English so they can be filed
+        // against any GitHub repo without depending on the maintainer's locale.
+        // Headings/labels are localized so the user sees their language while
+        // composing, while the structural keywords (Environment, Steps) stay
+        // grep-able for the maintainer.
         let title = "Crash: \(report.exceptionType ?? "unknown") (\(report.appVersion ?? "?"))"
         let signalSuffix = report.signal.map { " / \($0)" } ?? ""
+        let situation = String(localized: "Situation")
+        let situationHint = String(localized: "What were you doing when the crash happened? Steps to reproduce, if any, are appreciated.")
+        let environment = String(localized: "Environment")
+        let exceptionLabel = String(localized: "Exception")
+        let occurredLabel = String(localized: "Occurred at")
+        let crashReportHeading = String(localized: "Crash report")
+        let pasteHint = String(localized: "The full report has been copied to the clipboard. Paste it into the code block below.")
+        let pastePlaceholder = String(localized: "(paste here)")
         let body = """
-        ## 状況
+        ## \(situation)
 
-        <!-- どんな操作をしていてクラッシュしましたか？ 再現手順があれば教えてください -->
+        <!-- \(situationHint) -->
 
-        ## 環境
+        ## \(environment)
 
         - swift-inspector: \(report.appVersion ?? "?")
         - macOS: \(report.osVersion ?? "?")
-        - 例外: \(report.exceptionType ?? "?")\(signalSuffix)
-        - 発生日時: \(formattedDate(report.date))
+        - \(exceptionLabel): \(report.exceptionType ?? "?")\(signalSuffix)
+        - \(occurredLabel): \(formattedDate(report.date))
 
-        ## クラッシュレポート
+        ## \(crashReportHeading)
 
-        <!-- 完全なレポートをクリップボードにコピーしました。下のコードブロックに貼り付けてください -->
+        <!-- \(pasteHint) -->
 
         ```
-        （ここに貼り付け）
+        \(pastePlaceholder)
         ```
         """
         components?.queryItems = [

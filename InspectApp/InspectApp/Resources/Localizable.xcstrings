@@ -1,0 +1,676 @@
+{
+  "sourceLanguage" : "en",
+  "version" : "1.0",
+  "strings" : {
+    "%lld report(s) found. Sharing them on GitHub helps us fix issues." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld report(s) found. Sharing them on GitHub helps us fix issues."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 件のレポートが見つかりました。GitHub に共有していただけると修正に役立ちます。"
+          }
+        }
+      }
+    },
+    "0 (unlimited)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "0 (unlimited)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "0（制限なし）" } }
+      }
+    },
+    "(paste here)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "(paste here)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "（ここに貼り付け）" } }
+      }
+    },
+    "Accessibility" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Accessibility" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "アクセシビリティ" } }
+      }
+    },
+    "Appearance" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Appearance" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "外観" } }
+      }
+    },
+    "Approve the connection on the device…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Approve the connection on the device…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス側で接続を承認してください…" } }
+      }
+    },
+    "Auto-refreshing every %@s — click to pause" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto-refreshing every %@s — click to pause" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@s ごとに自動更新 — クリックで停止" } }
+      }
+    },
+    "Auto-refreshing every %@s via client polling — click to pause" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto-refreshing every %@s via client polling — click to pause" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@s ごとに自動更新（クライアントポーリング） — クリックで停止" } }
+      }
+    },
+    "Auto-refreshing every %@s via server push — click to pause" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto-refreshing every %@s via server push — click to pause" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@s ごとに自動更新（サーバープッシュ） — クリックで停止" } }
+      }
+    },
+    "Awaiting approval on the device…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awaiting approval on the device…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス側で承認待ち…" } }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "キャンセル" } }
+      }
+    },
+    "Cancel this connection attempt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel this connection attempt" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "接続試行をキャンセル" } }
+      }
+    },
+    "Capturing hierarchy…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Capturing hierarchy…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "階層を取得中…" } }
+      }
+    },
+    "Center" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Center" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "中心" } }
+      }
+    },
+    "Check for Updates…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Check for Updates…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "アップデートを確認…" } }
+      }
+    },
+    "Children" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Children" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "子要素" } }
+      }
+    },
+    "Clear pinned compare" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear pinned compare" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象の固定を解除" } }
+      }
+    },
+    "Close" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "閉じる" } }
+      }
+    },
+    "Compare" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compare" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象" } }
+      }
+    },
+    "compare is above selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "compare is above selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象は選択の上側" } }
+      }
+    },
+    "compare is below selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "compare is below selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象は選択の下側" } }
+      }
+    },
+    "compare is inside selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "compare is inside selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象が選択内にある" } }
+      }
+    },
+    "compare is left of selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "compare is left of selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象は選択の左側" } }
+      }
+    },
+    "compare is right of selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "compare is right of selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象は選択の右側" } }
+      }
+    },
+    "Connect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "接続" } }
+      }
+    },
+    "Connect to a device and capture a snapshot." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect to a device and capture a snapshot." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイスに接続してスナップショットを取得してください。" } }
+      }
+    },
+    "Connect to the selected device" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect to the selected device" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択中のデバイスに接続" } }
+      }
+    },
+    "Connecting…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connecting…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "接続中…" } }
+      }
+    },
+    "Constraints (%lld)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Constraints (%lld)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "制約（%lld）" } }
+      }
+    },
+    "Copy Family Name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Family Name" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファミリー名をコピー" } }
+      }
+    },
+    "Copy Font Name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Font Name" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォント名をコピー" } }
+      }
+    },
+    "Copy HEX  %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy HEX  %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "HEX をコピー  %@" } }
+      }
+    },
+    "Copy HEX + Alpha  %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy HEX + Alpha  %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "HEX + Alpha をコピー  %@" } }
+      }
+    },
+    "Copy rgba(…)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy rgba(…)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "rgba(…) をコピー" } }
+      }
+    },
+    "Copy SwiftUI Color" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy SwiftUI Color" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "SwiftUI Color をコピー" } }
+      }
+    },
+    "Copy UIColor(…)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy UIColor(…)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "UIColor(…) をコピー" } }
+      }
+    },
+    "count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "count" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "個数" } }
+      }
+    },
+    "Crash" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crash" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュ" } }
+      }
+    },
+    "Crash report" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crash report" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュレポート" } }
+      }
+    },
+    "Crash notifications are currently enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crash notifications are currently enabled" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュ通知は現在有効です" } }
+      }
+    },
+    "Crashes detected since last launch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Crashes detected since last launch" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "前回起動以降にクラッシュを検出しました" } }
+      }
+    },
+    "Device" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Device" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス" } }
+      }
+    },
+    "Device did not approve in time" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Device did not approve in time" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス側で承認されませんでした（タイムアウト）" } }
+      }
+    },
+    "Disconnect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "切断" } }
+      }
+    },
+    "Disconnect and connect to %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect and connect to %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "現在のセッションを切断して %@ に接続" } }
+      }
+    },
+    "disjoint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "disjoint" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "離れている" } }
+      }
+    },
+    "Dismiss this sheet. You will be notified again on future crashes." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dismiss this sheet. You will be notified again on future crashes." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このシートを閉じます。今後クラッシュが起きたら再度通知します。" } }
+      }
+    },
+    "Environment" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Environment" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "環境" } }
+      }
+    },
+    "Exception" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exception" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "例外" } }
+      }
+    },
+    "Exit Focus" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exit Focus" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォーカス解除" } }
+      }
+    },
+    "Exit focus (⌘⇧F)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exit focus (⌘⇧F)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォーカスを解除（⌘⇧F）" } }
+      }
+    },
+    "Exit focus — show the full hierarchy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exit focus — show the full hierarchy" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォーカスを解除して全階層を表示" } }
+      }
+    },
+    "Focus" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォーカス" } }
+      }
+    },
+    "Focus the tree and scene on the selected view (⌘⇧F)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus the tree and scene on the selected view (⌘⇧F)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択中のビューにツリーとシーンをフォーカス（⌘⇧F）" } }
+      }
+    },
+    "Focused on" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focused on" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フォーカス対象" } }
+      }
+    },
+    "Frame" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Frame" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "フレーム" } }
+      }
+    },
+    "Group" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Group" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "グループ" } }
+      }
+    },
+    "Hide details" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide details" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "詳細を隠す" } }
+      }
+    },
+    "High" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "High" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "高" } }
+      }
+    },
+    "Hold Option and hover a view to measure, or pin one below." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hold Option and hover a view to measure, or pin one below." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Option を押しながらビューにホバー、または下のボタンで固定すると計測できます。" } }
+      }
+    },
+    "Hover" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hover" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ホバー中" } }
+      }
+    },
+    "identical" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "identical" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "一致" } }
+      }
+    },
+    "identifier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "identifier" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "識別子" } }
+      }
+    },
+    "Inspector" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inspector" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "インスペクタ" } }
+      }
+    },
+    "Interaction" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interaction" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "操作" } }
+      }
+    },
+    "Interval" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interval" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "更新間隔" } }
+      }
+    },
+    "Jump to %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Jump to %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ にジャンプ" } }
+      }
+    },
+    "label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "label" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ラベル" } }
+      }
+    },
+    "Layer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Layer" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "レイヤー" } }
+      }
+    },
+    "Live" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Live" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ライブ" } }
+      }
+    },
+    "Low" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Low" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "低" } }
+      }
+    },
+    "Measurement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Measurement" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "計測" } }
+      }
+    },
+    "No Device" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No Device" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス未選択" } }
+      }
+    },
+    "No Hierarchy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No Hierarchy" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "階層がありません" } }
+      }
+    },
+    "No image" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No image" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "画像なし" } }
+      }
+    },
+    "No Selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No Selection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択なし" } }
+      }
+    },
+    "Occurred at" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Occurred at" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "発生日時" } }
+      }
+    },
+    "overlapping" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "overlapping" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "重なっている" } }
+      }
+    },
+    "overlapping x" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "overlapping x" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "x 軸が重なっている" } }
+      }
+    },
+    "overlapping y" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "overlapping y" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "y 軸が重なっている" } }
+      }
+    },
+    "Pause Live" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause Live" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ライブ停止" } }
+      }
+    },
+    "Pin this view as compare" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pin this view as compare" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このビューを比較対象として固定" } }
+      }
+    },
+    "Properties" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Properties" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "プロパティ" } }
+      }
+    },
+    "Quality" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quality" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "圧縮率" } }
+      }
+    },
+    "Quality used when JPEG-compressing group screenshots on the device. Higher means sharper but larger payloads. Ignored when the server doesn't support it (protocol < 5)." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quality used when JPEG-compressing group screenshots on the device. Higher means sharper but larger payloads. Ignored when the server doesn't support it (protocol < 5)." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイス側でグループスクリーンショットを JPEG 圧縮する際の品質。高いほど鮮明ですが転送量が増えます。サーバが対応していない場合（プロトコル v5 未満）は無視されます。" } }
+      }
+    },
+    "Re-enable crash notifications and surface any unseen reports immediately" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Re-enable crash notifications and surface any unseen reports immediately" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュ通知を再び有効にし、未確認のレポートがあれば即時表示します" } }
+      }
+    },
+    "Re-enable Crash Notifications" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Re-enable Crash Notifications" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュ通知を再度オンにする" } }
+      }
+    },
+    "Refresh" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "再取得" } }
+      }
+    },
+    "Relation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Relation" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "関係" } }
+      }
+    },
+    "Report on GitHub" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Report on GitHub" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "GitHub で報告" } }
+      }
+    },
+    "Retry — last attempt failed: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry — last attempt failed: %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "再試行 — 直前の失敗: %@" } }
+      }
+    },
+    "Retry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "再試行" } }
+      }
+    },
+    "Retry the connection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry the connection" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "接続を再試行" } }
+      }
+    },
+    "Save PNG" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save PNG" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "PNG を保存" } }
+      }
+    },
+    "Save this screenshot as a PNG" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save this screenshot as a PNG" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "このスクリーンショットを PNG として保存" } }
+      }
+    },
+    "Screenshot" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screenshot" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "スクリーンショット" } }
+      }
+    },
+    "Select a node to inspect its attributes." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a node to inspect its attributes." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ノードを選択して属性を確認してください。" } }
+      }
+    },
+    "selection is inside compare" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "selection is inside compare" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択が比較対象内にある" } }
+      }
+    },
+    "Show details" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show details" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "詳細を表示" } }
+      }
+    },
+    "Situation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Situation" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "状況" } }
+      }
+    },
+    "Solo" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Solo" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "単体" } }
+      }
+    },
+    "Start auto-refreshing the hierarchy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Start auto-refreshing the hierarchy" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "階層の自動更新を開始" } }
+      }
+    },
+    "Suppress this sheet for future crashes. You can re-enable it from the menu." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Suppress this sheet for future crashes. You can re-enable it from the menu." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "今後クラッシュが起きてもこのシートを出しません。メニューから再度有効にできます。" } }
+      }
+    },
+    "the selected device" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "the selected device" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "選択中のデバイス" } }
+      }
+    },
+    "Copy the full report to the clipboard and open the new-issue page in your browser" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy the full report to the clipboard and open the new-issue page in your browser" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "レポート全文をクリップボードにコピーし、ブラウザで Issue 作成画面を開きます" } }
+      }
+    },
+    "Turn off crash notifications" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn off crash notifications" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "クラッシュ通知をオフにする" } }
+      }
+    },
+    "Typography" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Typography" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "タイポグラフィ" } }
+      }
+    },
+    "Unpin this view" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unpin this view" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象の固定を解除" } }
+      }
+    },
+    "What were you doing when the crash happened? Steps to reproduce, if any, are appreciated." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "What were you doing when the crash happened? Steps to reproduce, if any, are appreciated." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "どんな操作をしていてクラッシュしましたか？再現手順があれば教えてください" } }
+      }
+    },
+    "The full report has been copied to the clipboard. Paste it into the code block below." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The full report has been copied to the clipboard. Paste it into the code block below." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "完全なレポートをクリップボードにコピーしました。下のコードブロックに貼り付けてください" } }
+      }
+    }
+  }
+}
