@@ -206,6 +206,9 @@ private struct SceneKitView: NSViewRepresentable {
         scnView.antialiasingMode = .multisampling4X
         scnView.scene = SCNScene()
         scnView.scene?.background.contents = NSColor.windowBackgroundColor
+        // Trackpad flick → controller decelerates → calls cameraInertiaDidEnd
+        // on this delegate. mouseUp covers the no-inertia path.
+        scnView.defaultCameraController.delegate = scnView
 
         let click = NSClickGestureRecognizer(
             target: context.coordinator,
@@ -1049,12 +1052,23 @@ private struct SceneKitView: NSViewRepresentable {
 /// Option key is held, the view under the cursor streams out via
 /// `hoverHandler`. Releasing Option clears the hover so any pinned compare
 /// node returns to the foreground.
-final class InspectSCNView: SCNView {
+final class InspectSCNView: SCNView, SCNCameraControllerDelegate {
     var hoverHandler: ((UUID?) -> Void)?
 
     private var trackingArea: NSTrackingArea?
     private var optionHeld: Bool = false
     private var lastHoverID: UUID?
+    /// True between `cameraInertiaWillStart` and `cameraInertiaDidEnd`. Lets
+    /// `mouseUp` skip its snap when a trackpad flick has actually triggered
+    /// inertia — otherwise we'd snap once at release, then again when the
+    /// inertia settles, producing a visible two-stage animation.
+    private var isCameraDecelerating: Bool = false
+    /// Half-angle around the +Z target axis where releasing the camera snaps
+    /// it dead-on. Matches the Xcode View Debugger feel — small enough that
+    /// users intentionally aiming for an oblique view aren't dragged back to
+    /// front, large enough that "almost head-on" actually clicks into place.
+    private static let snapAngleThreshold: CGFloat = 0.17  // ~10°
+    private static let snapAnimationDuration: CFTimeInterval = 0.2
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -1158,6 +1172,76 @@ final class InspectSCNView: SCNView {
             current = n.parent
         }
         return nil
+    }
+
+    // MARK: - Front-snap
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        // Defer one runloop tick so a trackpad flick — which fires `mouseUp`
+        // first and then `cameraInertiaWillStart` synchronously after — has a
+        // chance to flip `isCameraDecelerating` before this closure runs.
+        // Dragging with the mouse never starts inertia, so the flag stays
+        // false and the snap proceeds as expected.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isCameraDecelerating else { return }
+            self.snapToFrontIfNear()
+        }
+    }
+
+    func cameraInertiaWillStart(for cameraController: SCNCameraController) {
+        isCameraDecelerating = true
+    }
+
+    func cameraInertiaDidEnd(for cameraController: SCNCameraController) {
+        isCameraDecelerating = false
+        // Hop to main explicitly. SceneKit doesn't document which thread fires
+        // the controller delegate, and `SCNTransaction` + node mutation must
+        // run on main to stay consistent with the rest of the renderer.
+        DispatchQueue.main.async { [weak self] in
+            self?.snapToFrontIfNear()
+        }
+    }
+
+    private func snapToFrontIfNear() {
+        guard let cameraNode = pointOfView else { return }
+        let target = defaultCameraController.target
+        let dx = cameraNode.position.x - target.x
+        let dy = cameraNode.position.y - target.y
+        let dz = cameraNode.position.z - target.z
+        let horizontal = sqrt(dx * dx + dz * dz)
+        // Camera collapsed onto the target would make atan2 meaningless; treat
+        // it as already-front and bail rather than dividing by ~zero.
+        guard horizontal > 0.001 else { return }
+
+        // "Front" = camera sitting on the +Z axis from target. yaw is the swing
+        // around Y, pitch is the tilt around X. Both must be inside the
+        // threshold for the snap to feel like a deliberate "click into place"
+        // rather than a sideways pull.
+        let yaw = atan2(dx, dz)
+        let pitch = atan2(dy, horizontal)
+        guard abs(yaw) < Self.snapAngleThreshold,
+              abs(pitch) < Self.snapAngleThreshold else { return }
+
+        // Already aligned (within float noise) — skip the animation so we
+        // don't trigger redundant work on every micro-drag.
+        if abs(yaw) < 1e-4, abs(pitch) < 1e-4 { return }
+
+        let distance = sqrt(dx * dx + dy * dy + dz * dz)
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = Self.snapAnimationDuration
+        SCNTransaction.completionBlock = { [weak self] in
+            // Re-assign pointOfView so SCNCameraController re-reads the new
+            // transform into its (private) spherical-coords cache. Without
+            // this the next drag would start from the pre-snap angle and the
+            // camera would visibly jump back out before the gesture catches
+            // up.
+            guard let self, let pov = self.pointOfView else { return }
+            self.defaultCameraController.pointOfView = pov
+        }
+        cameraNode.position = SCNVector3(target.x, target.y, target.z + distance)
+        cameraNode.look(at: target)
+        SCNTransaction.commit()
     }
 }
 
