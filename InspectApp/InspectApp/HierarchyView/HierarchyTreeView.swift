@@ -23,6 +23,7 @@ struct HierarchyTreeView: View {
                         FilteredOutlineGroup(
                             root: root,
                             path: rootPath,
+                            expandedPaths: $expandedPaths,
                             filter: filter
                         )
                     }
@@ -106,14 +107,17 @@ private struct PersistentOutlineNode: View {
 //   - Non-matching ancestor nodes are shown but dimmed
 //   - Matching nodes are highlighted
 //
-// Filter mode deliberately uses DisclosureGroup's built-in expansion
-// (not the stable-path Set) because the set of visible branches is already
-// determined by matching — persisted expansion from the unfiltered view
-// would fight the filter logic.
+// Shares the unfiltered tree's `expandedPaths` so:
+//   - Manual expand/collapse during filtering survives clearing the filter.
+//   - Ancestor nodes with matching descendants auto-expand without polluting
+//     `expandedPaths` (the auto-expansion is a *display* override, not a
+//     stored state), so when the filter is cleared the tree returns to the
+//     pre-filter shape with any deliberate user changes preserved.
 
 private struct FilteredOutlineGroup: View {
     let root: ViewNode
     let path: [String]
+    @Binding var expandedPaths: Set<String>
     let filter: HierarchyFilter
 
     var body: some View {
@@ -133,11 +137,12 @@ private struct FilteredOutlineGroup: View {
                 )
                 .tag(root.id)
             } else {
-                DisclosureGroup {
+                DisclosureGroup(isExpanded: expandedBinding(for: pathKey)) {
                     ForEach(filteredChildren, id: \.element.id) { index, child in
                         FilteredOutlineGroup(
                             root: child,
                             path: path + [child.stablePathSegment(siblingIndex: index)],
+                            expandedPaths: $expandedPaths,
                             filter: filter
                         )
                     }
@@ -152,6 +157,26 @@ private struct FilteredOutlineGroup: View {
                 }
             }
         }
+    }
+
+    private func expandedBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: {
+                // Auto-expand ancestor nodes whose only role is to host a
+                // matching descendant. Persisted `expandedPaths` still wins
+                // so a user who explicitly opens or closes a row during
+                // filtering keeps that intent.
+                if expandedPaths.contains(key) { return true }
+                return !filter.matches(root)
+            },
+            set: { newValue in
+                if newValue {
+                    expandedPaths.insert(key)
+                } else {
+                    expandedPaths.remove(key)
+                }
+            }
+        )
     }
 }
 

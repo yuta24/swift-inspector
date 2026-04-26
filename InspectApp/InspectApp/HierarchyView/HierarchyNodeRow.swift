@@ -38,14 +38,45 @@ struct HierarchyNodeRow: View {
 
     @ViewBuilder
     private var classNameView: some View {
-        let textHighlight = !isDimmed && !filter.text.isEmpty
-            && node.className.localizedCaseInsensitiveContains(filter.text)
-        Text(node.className)
-            .font(.system(.callout, design: .monospaced))
-            .foregroundStyle(textHighlight ? .yellow : (node.isHidden ? .secondary : .primary))
-            .lineLimit(1)
-            .truncationMode(.middle)
+        if let display = node.displayName {
+            HStack(spacing: 4) {
+                Text(display)
+                    .font(.callout)
+                    .foregroundStyle(primaryHighlight ? .yellow : (node.isHidden ? .secondary : .primary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(node.shortClassName)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+            }
             .help(node.className)
+        } else {
+            Text(node.shortClassName)
+                .font(.system(.callout, design: .monospaced))
+                .foregroundStyle(classNameHighlight ? .yellow : (node.isHidden ? .secondary : .primary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(node.className)
+        }
+    }
+
+    /// True when filter matches the primary string we're rendering: the
+    /// `displayName` (when present) plus className/accessibilityLabel that
+    /// would have produced it.
+    private var primaryHighlight: Bool {
+        guard !isDimmed, !filter.text.isEmpty else { return false }
+        if let display = node.displayName,
+           display.localizedCaseInsensitiveContains(filter.text) {
+            return true
+        }
+        return node.className.localizedCaseInsensitiveContains(filter.text)
+    }
+
+    private var classNameHighlight: Bool {
+        guard !isDimmed, !filter.text.isEmpty else { return false }
+        return node.className.localizedCaseInsensitiveContains(filter.text)
     }
 
     @ViewBuilder

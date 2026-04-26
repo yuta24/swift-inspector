@@ -264,11 +264,19 @@ private struct FocusBar: View {
             Text("Focused on")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(verbatim: node.className)
-                .font(.caption.monospaced())
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(node.className)
+            if let display = node.displayName {
+                Text(verbatim: display)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(node.className)
+            } else {
+                Text(verbatim: node.shortClassName)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(node.className)
+            }
             Spacer(minLength: 4)
             Button {
                 onClear()
@@ -550,8 +558,20 @@ private struct InspectorView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     // Header
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(node.className)
-                            .font(.headline.monospaced())
+                        if let display = node.displayName {
+                            Text(display)
+                                .font(.headline)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                            Text(node.className)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        } else {
+                            Text(node.className)
+                                .font(.headline.monospaced())
+                                .textSelection(.enabled)
+                        }
                         Text(node.ident.uuidString)
                             .font(.caption2.monospaced())
                             .foregroundStyle(.tertiary)
@@ -563,8 +583,18 @@ private struct InspectorView: View {
                         NodeCopyMenu(node: node)
                     }
 
+                    // Designer-first ordering: visual essentials (what does
+                    // it look like? where is it? what color/type is it?)
+                    // come above the developer-oriented sections (raw
+                    // interaction flags, Auto Layout constraints, runtime
+                    // property dumps).
                     ScreenshotSection(node: node)
                     FrameSection(frame: node.frame)
+                    AppearanceSection(node: node)
+                    if let typography = node.typography {
+                        TypographySection(typography: typography)
+                    }
+                    LayerSection(node: node)
                     MeasurementSection(
                         selection: node,
                         compare: compareNode,
@@ -572,13 +602,10 @@ private struct InspectorView: View {
                         measurementReferenceID: $measurementReferenceID,
                         onNavigate: { id in selectedNodeID = id }
                     )
-                    if let typography = node.typography {
-                        TypographySection(typography: typography)
-                    }
-                    AppearanceSection(node: node)
-                    LayerSection(node: node)
-                    InteractionSection(node: node)
                     AccessibilitySection(node: node)
+
+                    // Developer-oriented sections.
+                    InteractionSection(node: node)
                     ConstraintsSection(
                         node: node,
                         onNavigate: { id in selectedNodeID = id }
@@ -1002,13 +1029,15 @@ private struct MeasurementSection: View {
     }
 
     private func compareRow(_ compare: ViewNode) -> some View {
-        HStack(spacing: 6) {
+        let buttonLabel = compare.displayName ?? compare.shortClassName
+        let usesDisplayName = compare.displayName != nil
+        return HStack(spacing: 6) {
             PropertyLabel(isHoveringCompare ? "Hover" : "Compare")
             Button {
                 onNavigate(compare.id)
             } label: {
-                Text(verbatim: compare.className)
-                    .font(.caption.monospaced())
+                Text(verbatim: buttonLabel)
+                    .font(usesDisplayName ? .caption : .caption.monospaced())
                     .foregroundStyle(.tint)
                     .lineLimit(1)
             }
