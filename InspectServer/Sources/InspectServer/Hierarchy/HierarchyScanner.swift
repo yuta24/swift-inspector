@@ -75,6 +75,23 @@ public enum HierarchyScanner {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// `String(describing: type(of: x))` allocates a new Swift String on every
+    /// call (it walks the type metadata to format the demangled name). At ~1k
+    /// nodes per capture × 2 calls per node that adds ~1ms of pure metadata
+    /// formatting. Cache by the class's identity so repeated UIView/UILabel
+    /// hits in the same tree only pay the formatting cost once.
+    /// MainActor-isolated, so no synchronization needed.
+    private static var classNameCache: [ObjectIdentifier: String] = [:]
+
+    private static func className(of obj: AnyObject) -> String {
+        let cls: AnyClass = type(of: obj)
+        let key = ObjectIdentifier(cls)
+        if let hit = classNameCache[key] { return hit }
+        let name = String(describing: cls)
+        classNameCache[key] = name
+        return name
+    }
+
     static func buildNode(
         from view: UIView,
         window: UIWindow,
@@ -196,7 +213,7 @@ public enum HierarchyScanner {
 
         return ViewNode(
             ident: nodeIdent,
-            className: String(describing: type(of: view)),
+            className: Self.className(of: view),
             frame: view.frame,
             windowFrame: windowFrame,
             boundsOrigin: view.bounds.origin,
@@ -306,7 +323,7 @@ public enum HierarchyScanner {
 
         return ViewNode(
             ident: nodeIdent,
-            className: String(describing: type(of: layer)),
+            className: Self.className(of: layer),
             frame: layer.frame,
             windowFrame: windowFrame,
             boundsOrigin: layer.bounds.origin,
@@ -378,7 +395,7 @@ public enum HierarchyScanner {
     /// subclasses are filtered out.
     private static func extractConstraints(from view: UIView) -> [LayoutConstraint] {
         view.constraints.compactMap { constraint in
-            let constraintClass = String(describing: type(of: constraint))
+            let constraintClass = className(of: constraint)
             // Skip UIKit-generated constraint subclasses — they describe
             // system layout (safe area, keyboard, etc.) or the implicit
             // frame translation that UIKit adds for views with
@@ -430,13 +447,13 @@ public enum HierarchyScanner {
         if let view = item as? UIView {
             return LayoutConstraint.Anchor(
                 ownerID: ViewIdentRegistry.shared.ident(for: view),
-                description: String(describing: type(of: view)),
+                description: className(of: view),
                 isLayoutGuide: false,
                 attribute: attribute.rawValue
             )
         }
         if let guide = item as? UILayoutGuide {
-            let ownerClass = guide.owningView.map { String(describing: type(of: $0)) } ?? "?"
+            let ownerClass = guide.owningView.map { className(of: $0) } ?? "?"
             let guideName = guideIdentifier(guide)
             return LayoutConstraint.Anchor(
                 ownerID: guide.owningView.flatMap { ViewIdentRegistry.shared.ident(for: $0) },
@@ -452,7 +469,7 @@ public enum HierarchyScanner {
         // descriptive name so the user still sees it.
         return LayoutConstraint.Anchor(
             ownerID: nil,
-            description: String(describing: type(of: item!)),
+            description: className(of: item!),
             isLayoutGuide: false,
             attribute: attribute.rawValue
         )
@@ -738,6 +755,20 @@ public enum HierarchyScanner {
         case .natural: return "natural"
         default: return "natural"
         }
+    }
+}
+
+extension HierarchyScanner {
+    /// Test-only entry points so benchmarks can isolate the per-view cost
+    /// of each extractor without measuring the rest of buildNode around it.
+    static func _extractPropertiesForTesting(_ view: UIView) -> [String: String] {
+        extractProperties(from: view)
+    }
+    static func _extractTypographyForTesting(_ view: UIView) -> Typography? {
+        extractTypography(from: view)
+    }
+    static func _extractConstraintsForTesting(_ view: UIView) -> [LayoutConstraint] {
+        extractConstraints(from: view)
     }
 }
 #endif

@@ -46,6 +46,16 @@ final class PerformanceTests: XCTestCase {
         1 + node.children.reduce(0) { $0 + nodeCount($1) }
     }
 
+    private func collectAllViews(_ root: UIView) -> [UIView] {
+        var result: [UIView] = [root]
+        var i = 0
+        while i < result.count {
+            result.append(contentsOf: result[i].subviews)
+            i += 1
+        }
+        return result
+    }
+
     // MARK: - Baselines
 
     /// ~256 nodes (4-wide × 4-deep). Should be sub-millisecond — anything
@@ -139,6 +149,53 @@ final class PerformanceTests: XCTestCase {
         let (_, root) = buildWideTree(branching: 8, depth: 4)
         measure {
             _ = HierarchyChangeMonitor._hashTreesForTesting([root])
+        }
+    }
+
+    // MARK: - Per-extractor decomposition
+    //
+    // buildNode at 1296 nodes lands at ~7ms. These tests break that down so
+    // we can see which extractor is dominant before optimizing further.
+    // Each measure block runs the extractor across all ~1296 views once.
+
+    func test_perf_extract_classNameDescription_mediumTree() {
+        let (_, root) = buildWideTree(branching: 6, depth: 4)
+        let allViews = collectAllViews(root)
+        XCTAssertGreaterThan(allViews.count, 1000)
+        measure {
+            for v in allViews {
+                _ = String(describing: type(of: v))
+            }
+        }
+    }
+
+    func test_perf_extract_properties_mediumTree() {
+        let (_, root) = buildWideTree(branching: 6, depth: 4)
+        let allViews = collectAllViews(root)
+        measure {
+            for v in allViews {
+                _ = HierarchyScanner._extractPropertiesForTesting(v)
+            }
+        }
+    }
+
+    func test_perf_extract_typography_mediumTree() {
+        let (_, root) = buildWideTree(branching: 6, depth: 4)
+        let allViews = collectAllViews(root)
+        measure {
+            for v in allViews {
+                _ = HierarchyScanner._extractTypographyForTesting(v)
+            }
+        }
+    }
+
+    func test_perf_extract_constraints_mediumTree() {
+        let (_, root) = buildWideTree(branching: 6, depth: 4)
+        let allViews = collectAllViews(root)
+        measure {
+            for v in allViews {
+                _ = HierarchyScanner._extractConstraintsForTesting(v)
+            }
         }
     }
 
