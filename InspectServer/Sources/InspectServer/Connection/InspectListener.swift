@@ -10,7 +10,7 @@ import UIKit
 
 private let logger = Logger(subsystem: "swift-inspector", category: "server")
 
-public final class InspectListener {
+final class InspectListener {
     private let queue = DispatchQueue(label: "swift-inspector.listener")
     private let serializer: MessageSerializer
     private let serviceName: String
@@ -32,7 +32,7 @@ public final class InspectListener {
     @MainActor private var monitor: HierarchyChangeMonitor?
     #endif
 
-    public init(
+    init(
         serviceName: String? = nil,
         serializer: MessageSerializer = JSONMessageSerializer()
     ) {
@@ -41,7 +41,7 @@ public final class InspectListener {
         self.pairingStore = PairingStore()
     }
 
-    public func start() throws {
+    func start() throws {
         stop()
         let params = NWParameters.tcp
         params.includePeerToPeer = true
@@ -59,7 +59,7 @@ public final class InspectListener {
         logger.info("Listener started: service=\(self.serviceName, privacy: .public)")
     }
 
-    public func stop() {
+    func stop() {
         listener?.cancel()
         listener = nil
         for connection in connections.values {

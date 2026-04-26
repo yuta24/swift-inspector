@@ -1,17 +1,17 @@
 #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
 import UIKit
 
-public enum ScreenshotCapture {
+enum ScreenshotCapture {
     /// JPEG compression quality used for group (and layer-group) screenshots.
     /// Set by the listener whenever the client sends `setOptions`. The default
     /// (0.7) is balanced for the device-→Mac wire — visibly fine, ~3× smaller
     /// than 0.95. Allowed range is 0.1…1.0; values outside that are ignored
     /// by the listener before they reach this point.
-    @MainActor public static var jpegQuality: CGFloat = 0.7
+    @MainActor static var jpegQuality: CGFloat = 0.7
 
     /// Capture the entire window as a CGImage for cropping individual views.
     @MainActor
-    public static func captureWindow(_ window: UIWindow) -> (CGImage, CGFloat)? {
+    static func captureWindow(_ window: UIWindow) -> (CGImage, CGFloat)? {
         let bounds = window.bounds
         guard bounds.width >= 1, bounds.height >= 1 else { return nil }
 
@@ -27,7 +27,7 @@ public enum ScreenshotCapture {
 
     /// Crop a region from a window-level CGImage for a specific view (group screenshot).
     @MainActor
-    public static func crop(
+    static func crop(
         from windowImage: CGImage,
         scale: CGFloat,
         view: UIView,
@@ -47,7 +47,7 @@ public enum ScreenshotCapture {
     /// Uses CALayer.render(in:) with sublayers temporarily hidden.
     /// Returns PNG data to preserve transparency for 3D layer compositing.
     @MainActor
-    public static func soloScreenshot(of view: UIView) -> Data? {
+    static func soloScreenshot(of view: UIView) -> Data? {
         let layer = view.layer
         let bounds = layer.bounds
         guard bounds.width >= 1, bounds.height >= 1 else { return nil }
@@ -84,7 +84,7 @@ public enum ScreenshotCapture {
 
     /// Crop a region from a window-level CGImage for a specific CALayer (group screenshot).
     @MainActor
-    public static func cropLayer(
+    static func cropLayer(
         from windowImage: CGImage,
         scale: CGFloat,
         layer: CALayer,
@@ -127,7 +127,7 @@ public enum ScreenshotCapture {
     /// Capture a CALayer's own drawing with its sublayers hidden (solo screenshot).
     /// Safe because we only toggle CALayer.isHidden, not UIView.isHidden.
     @MainActor
-    public static func soloScreenshotOfLayer(_ layer: CALayer) -> Data? {
+    static func soloScreenshotOfLayer(_ layer: CALayer) -> Data? {
         let bounds = layer.bounds
         guard bounds.width >= 1, bounds.height >= 1 else { return nil }
 

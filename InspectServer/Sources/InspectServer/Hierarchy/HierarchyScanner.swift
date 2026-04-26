@@ -3,16 +3,16 @@ import UIKit
 import InspectCore
 
 @MainActor
-public enum HierarchyScanner {
+enum HierarchyScanner {
     /// Hard cap on recursion depth. Real UIKit hierarchies very rarely exceed
     /// ~50 levels; anything past this is almost certainly pathological (e.g.
     /// a custom container that re-parents itself), and recursing further
     /// risks a stack overflow inside `view.convert` / `layer.render`.
     /// When the cap is hit we return the current node with `children = []`
     /// and a `_truncated` marker in `properties` so the client can surface it.
-    public static let maxDepth = 200
+    static let maxDepth = 200
 
-    public static func captureAllWindows(captureScreenshots: Bool = true) -> [ViewNode] {
+    static func captureAllWindows(captureScreenshots: Bool = true) -> [ViewNode] {
         ViewIdentRegistry.shared.clear()
 
         let windows = UIApplication.shared.connectedScenes
