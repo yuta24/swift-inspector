@@ -8,6 +8,11 @@ import SwiftUI
 enum UserPreferences {
     enum Keys {
         static let screenshotJPEGQuality = "screenshotJPEGQuality"
+        /// Last Figma frame URL the user typed in the inspector's compare
+        /// section. Persisted across launches as a convenience — designers
+        /// usually compare against the same screen multiple times in a row,
+        /// so we pre-fill the field rather than ask them to re-paste.
+        static let figmaLastFrameURL = "figmaLastFrameURL"
     }
 
     /// JPEG compression quality the macOS client asks the device to use for

@@ -6,6 +6,7 @@ struct InspectAppMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = InspectAppModel()
     @StateObject private var crashPresenter = CrashReportPresenter()
+    @StateObject private var figmaModel = FigmaComparisonModel()
     /// Sparkle の自動アップデート一式。`.app` バンドルから起動された場合
     /// だけ生成する — `swift run` のような executable 直実行では Info.plist
     /// (SUFeedURL / SUPublicEDKey / CFBundleIdentifier) が解決できず
@@ -21,6 +22,7 @@ struct InspectAppMain: App {
             ContentView()
                 .environmentObject(model)
                 .environmentObject(crashPresenter)
+                .environmentObject(figmaModel)
                 .frame(minWidth: 960, minHeight: 600)
                 .onAppear {
                     model.startBrowsing()
@@ -42,6 +44,7 @@ struct InspectAppMain: App {
         Settings {
             PreferencesView()
                 .environmentObject(model)
+                .environmentObject(figmaModel)
         }
     }
 }

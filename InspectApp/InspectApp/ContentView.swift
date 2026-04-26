@@ -589,7 +589,9 @@ private struct InspectorView: View {
                     // interaction flags, Auto Layout constraints, runtime
                     // property dumps).
                     ScreenshotSection(node: node)
-                    FrameSection(frame: node.frame)
+                    FigmaCompareSection(node: node)
+                    FigmaDiffSection(node: node)
+                    FrameSection(frame: node.frame, safeAreaInsets: node.safeAreaInsets)
                     AppearanceSection(node: node)
                     if let typography = node.typography {
                         TypographySection(typography: typography)
@@ -686,6 +688,464 @@ private struct ScreenshotSection: View {
     }
 }
 
+// MARK: - Figma Compare Section
+
+/// Side-by-side / overlay / difference comparison between the device's
+/// captured screenshot and a Figma frame the designer pastes in.
+/// Reads `FigmaComparisonModel` from the environment so the same fetched
+/// image follows the user across selection changes (otherwise re-fetching
+/// every node click would burn through the per-minute API budget).
+private struct FigmaCompareSection: View {
+    let node: ViewNode
+    @EnvironmentObject var figmaModel: FigmaComparisonModel
+    @EnvironmentObject var model: InspectAppModel
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                urlField
+                if let error = figmaModel.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if figmaModel.image != nil {
+                    modePicker
+                    if figmaModel.displayMode == .overlay {
+                        opacitySlider
+                    }
+                    if let warning = figmaModel.sizeWarning {
+                        sizeMismatchBanner(warning)
+                    }
+                    Toggle("Mask status bar area", isOn: $figmaModel.maskStatusBar)
+                        .font(.caption)
+                        .toggleStyle(.checkbox)
+                    comparisonBody
+                }
+            }
+            .padding(4)
+        } label: {
+            SectionHeader("Figma Compare", icon: "rectangle.on.rectangle")
+        }
+        .onAppear {
+            recomputeWarning()
+            figmaModel.updateRoots(model.roots)
+        }
+        .onChange(of: figmaModel.image) { _, _ in recomputeWarning() }
+        .onChange(of: node.id) { _, _ in recomputeWarning() }
+        // Re-match whenever the iOS tree turns over (fresh capture or
+        // live tick that replaced root idents). Compare on each root's
+        // ident so multi-window captures (alerts, keyboards) and
+        // first-root churn both fire updates.
+        .onChange(of: model.roots.map(\.ident)) { _, _ in
+            figmaModel.updateRoots(model.roots)
+        }
+    }
+
+    private var urlField: some View {
+        HStack(spacing: 6) {
+            TextField("Figma frame URL", text: $figmaModel.frameURL)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { figmaModel.fetch() }
+            if figmaModel.isLoading {
+                ProgressView().controlSize(.small)
+            } else {
+                Button {
+                    figmaModel.fetch()
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                }
+                .buttonStyle(.borderless)
+                .disabled(figmaModel.frameURL.isEmpty)
+                .help("Fetch the frame from Figma")
+                if figmaModel.image != nil {
+                    Button {
+                        figmaModel.clear()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Clear the loaded Figma frame")
+                }
+            }
+        }
+    }
+
+    private var modePicker: some View {
+        Picker("", selection: $figmaModel.displayMode) {
+            ForEach(FigmaComparisonModel.DisplayMode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    private var opacitySlider: some View {
+        HStack(spacing: 6) {
+            Text("Opacity")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(value: $figmaModel.overlayOpacity, in: 0...1)
+            Text(verbatim: String(format: "%.0f%%", figmaModel.overlayOpacity * 100))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func sizeMismatchBanner(_ warning: FigmaComparisonModel.SizeWarning) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Width doesn't match")
+                    .font(.caption.weight(.semibold))
+                Text(verbatim: String(
+                    format: String(localized: "Figma %.0fpt / device %.0fpt — fitted to short edge"),
+                    warning.figmaPoints,
+                    warning.devicePoints
+                ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var comparisonBody: some View {
+        // Heatmap is a whole-window overview: rectangles live in window
+        // coords so we have to render them on top of the window image,
+        // not whatever subview the user happened to select. Other modes
+        // stay focused on the selection.
+        let useWindow = figmaModel.displayMode == .heatmap
+        let windowRoot = model.roots.first
+        let deviceImage: NSImage? = {
+            if useWindow {
+                return windowRoot?.screenshot.flatMap(NSImage.init(data:))
+                    ?? node.screenshot.flatMap(NSImage.init(data:))
+            }
+            return node.screenshot.flatMap(NSImage.init(data:))
+                ?? node.soloScreenshot.flatMap(NSImage.init(data:))
+        }()
+        let statusBarHeight = CGFloat(
+            (useWindow ? windowRoot?.safeAreaInsets?.top : node.safeAreaInsets?.top) ?? 0
+        )
+        FigmaComparisonCanvas(
+            deviceImage: deviceImage,
+            figmaImage: figmaModel.image,
+            mode: figmaModel.displayMode,
+            opacity: figmaModel.overlayOpacity,
+            maskStatusBar: figmaModel.maskStatusBar,
+            statusBarHeight: statusBarHeight,
+            roots: model.roots,
+            differingNodeIDs: figmaModel.differingNodeIDs
+        )
+    }
+
+    private func recomputeWarning() {
+        // windowFrame is the absolute AABB in the window's coord system —
+        // robust against transformed parents and scroll offsets, where
+        // node.frame would land on a parent-relative value that's mostly
+        // useless for "is this Figma frame the right canvas size".
+        figmaModel.updateSizeWarning(deviceWindowWidth: Double(node.windowFrame.width))
+    }
+}
+
+/// Pure rendering of the device + Figma image pair given the current
+/// display mode. Pulled out as a separate view so the surrounding section
+/// stays focused on input handling, and so SwiftUI Previews can drive
+/// every mode without spinning up the model.
+private struct FigmaComparisonCanvas: View {
+    let deviceImage: NSImage?
+    let figmaImage: NSImage?
+    let mode: FigmaComparisonModel.DisplayMode
+    let opacity: Double
+    let maskStatusBar: Bool
+    /// Status-bar height in the device's points coord system. Used to draw
+    /// a black bar across the top of the device image when the user wants
+    /// to ignore the iOS chrome — Figma frames typically don't include it.
+    let statusBarHeight: CGFloat
+    /// Window-rooted device hierarchy. Only consulted by the heatmap mode
+    /// to position diff markers; other modes ignore it.
+    let roots: [ViewNode]
+    /// IDs of every ViewNode whose Figma diff has at least one
+    /// differing attribute. The heatmap draws a red outline around each.
+    let differingNodeIDs: Set<UUID>
+
+    var body: some View {
+        let placeholderHeight: CGFloat = 200
+        switch mode {
+        case .deviceOnly, .figmaOnly:
+            singleImage(
+                mode == .deviceOnly ? deviceImage : figmaImage,
+                placeholderHeight: placeholderHeight
+            )
+        case .sideBySide:
+            HStack(spacing: 6) {
+                singleImage(deviceImage, placeholderHeight: placeholderHeight)
+                singleImage(figmaImage, placeholderHeight: placeholderHeight)
+            }
+        case .overlay, .difference:
+            overlayImage(placeholderHeight: placeholderHeight)
+        case .heatmap:
+            heatmapImage(placeholderHeight: placeholderHeight)
+        }
+    }
+
+    @ViewBuilder
+    private func heatmapImage(placeholderHeight: CGFloat) -> some View {
+        if let device = deviceImage, let windowWidth = roots.first?.windowFrame.width, windowWidth > 0 {
+            ZStack(alignment: .topLeading) {
+                Image(nsImage: device)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                GeometryReader { proxy in
+                    let scale = scaleForFit(image: device, in: proxy.size)
+                    let imageW = device.size.width * scale
+                    let imageH = device.size.height * scale
+                    let originX = max(0, (proxy.size.width - imageW) / 2)
+                    let originY = max(0, (proxy.size.height - imageH) / 2)
+                    // pixels-per-point is whatever ratio the device image
+                    // was captured at (typically 2x — see ScreenshotCapture).
+                    // Deriving from image vs window width keeps the heatmap
+                    // honest if iPhone scale changes or the image was
+                    // ever fetched at a different scale.
+                    let pixelsPerPoint = device.size.width / windowWidth
+                    let pointToImage = scale * pixelsPerPoint
+                    ZStack(alignment: .topLeading) {
+                        ForEach(differingRects(roots: roots), id: \.0) { idAndRect in
+                            let r = idAndRect.1
+                            Rectangle()
+                                .strokeBorder(.red, lineWidth: 1.5)
+                                .frame(
+                                    width: max(2, r.width * pointToImage),
+                                    height: max(2, r.height * pointToImage)
+                                )
+                                .offset(
+                                    x: originX + r.minX * pointToImage,
+                                    y: originY + r.minY * pointToImage
+                                )
+                        }
+                    }
+                    if maskStatusBar, statusBarHeight > 0 {
+                        Rectangle()
+                            .fill(.black)
+                            .frame(width: imageW, height: statusBarHeight * scale)
+                            .offset(x: originX, y: originY)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
+            .frame(maxHeight: placeholderHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+        } else {
+            singleImage(deviceImage, placeholderHeight: placeholderHeight)
+        }
+    }
+
+    /// Walks `roots` collecting `(id, windowFrame)` for every node whose
+    /// id is in `differingNodeIDs`. The id is included in the tuple so
+    /// SwiftUI's `ForEach` can identify rects without forcing `CGRect`
+    /// to be Identifiable.
+    private func differingRects(roots: [ViewNode]) -> [(UUID, CGRect)] {
+        var output: [(UUID, CGRect)] = []
+        var stack = roots
+        while let node = stack.popLast() {
+            if differingNodeIDs.contains(node.ident), node.windowFrame.width > 0, node.windowFrame.height > 0 {
+                output.append((node.ident, node.windowFrame))
+            }
+            stack.append(contentsOf: node.children)
+        }
+        return output
+    }
+
+    @ViewBuilder
+    private func singleImage(_ image: NSImage?, placeholderHeight: CGFloat) -> some View {
+        if let image {
+            ZStack(alignment: .top) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                if maskStatusBar, statusBarHeight > 0 {
+                    GeometryReader { proxy in
+                        let scale = scaleForFit(image: image, in: proxy.size)
+                        Rectangle()
+                            .fill(.black)
+                            .frame(width: image.size.width * scale,
+                                   height: statusBarHeight * scale)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(maxHeight: placeholderHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+        } else {
+            Text("No image")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: placeholderHeight)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
+    @ViewBuilder
+    private func overlayImage(placeholderHeight: CGFloat) -> some View {
+        if let device = deviceImage, let figma = figmaImage {
+            ZStack {
+                Image(nsImage: device)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                Image(nsImage: figma)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .opacity(mode == .overlay ? opacity : 1)
+                    .blendMode(mode == .difference ? .difference : .normal)
+                if maskStatusBar, statusBarHeight > 0 {
+                    GeometryReader { proxy in
+                        let scale = scaleForFit(image: device, in: proxy.size)
+                        Rectangle()
+                            .fill(.black)
+                            .frame(width: device.size.width * scale,
+                                   height: statusBarHeight * scale)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+            .frame(maxHeight: placeholderHeight)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+        } else {
+            singleImage(deviceImage ?? figmaImage, placeholderHeight: placeholderHeight)
+        }
+    }
+
+    /// Computes the aspect-fit scale factor a SwiftUI `aspectRatio(.fit)`
+    /// applies to the given image inside `container`. Used by the status-
+    /// bar mask to draw a rectangle that lines up with the visually-shown
+    /// image rather than the underlying frame.
+    private func scaleForFit(image: NSImage, in container: CGSize) -> CGFloat {
+        guard image.size.width > 0, image.size.height > 0 else { return 1 }
+        let scaleX = container.width / image.size.width
+        let scaleY = container.height / image.size.height
+        return min(scaleX, scaleY)
+    }
+}
+
+// MARK: - Figma Diff Section
+
+/// Spec-vs-implementation diff for the currently-selected ViewNode. Hidden
+/// when no Figma frame has been fetched or when the matcher couldn't pin
+/// the selection to a layer. Designers see two flavors of dot:
+/// green = matches Figma, red = differs. Unavailable rows are greyed out.
+private struct FigmaDiffSection: View {
+    let node: ViewNode
+    @EnvironmentObject var figmaModel: FigmaComparisonModel
+
+    var body: some View {
+        if let match = figmaModel.match(for: node), let diff = figmaModel.diff(for: node) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    matchHeader(match: match)
+                    if diff.items.isEmpty {
+                        Text("No comparable attributes")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Divider()
+                        ForEach(diff.items.indices, id: \.self) { index in
+                            row(diff.items[index])
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+            } label: {
+                SectionHeader("Figma Diff", icon: "arrow.triangle.branch")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func matchHeader(match: FigmaLayerMatcher.Match) -> some View {
+        HStack(spacing: 6) {
+            Text(match.layer.name)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            Text(verbatim: confidenceLabel(match))
+                .font(.caption2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(confidenceColor(match.confidence).opacity(0.18))
+                .foregroundStyle(confidenceColor(match.confidence))
+                .clipShape(Capsule())
+        }
+    }
+
+    private func confidenceLabel(_ match: FigmaLayerMatcher.Match) -> String {
+        switch match.strategy {
+        case .identifierName: return String(localized: "Name match")
+        case .textContent: return String(localized: "Text match")
+        case .boundingBox:
+            switch match.confidence {
+            case .high: return String(localized: "Layout match (strong)")
+            case .medium: return String(localized: "Layout match (weak)")
+            case .low: return String(localized: "Layout match (low)")
+            }
+        }
+    }
+
+    private func confidenceColor(_ c: FigmaLayerMatcher.Match.Confidence) -> Color {
+        switch c {
+        case .high: return .green
+        case .medium: return .orange
+        case .low: return .secondary
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ item: FigmaDiff.Item) -> some View {
+        HStack(spacing: 8) {
+            statusDot(item.status)
+            // `item.label` is built by FigmaDiffEngine via String(localized:),
+            // so it's already user-facing copy — pass through verbatim.
+            PropertyLabel(verbatim: item.label)
+            PropertyValue(item.figma ?? "—")
+                .foregroundStyle(item.status == .differ ? .primary : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            PropertyValue(item.device ?? "—")
+                .foregroundStyle(item.status == .differ ? .primary : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func statusDot(_ status: FigmaDiff.Status) -> some View {
+        let color: Color = {
+            switch status {
+            case .match: return .green
+            case .differ: return .red
+            case .unavailable: return .secondary
+            }
+        }()
+        Circle()
+            .fill(color)
+            .frame(width: 6, height: 6)
+    }
+}
+
 // MARK: - Screenshot Export
 
 /// Writes an encoded screenshot (JPEG for group, PNG for solo) to disk as a
@@ -723,6 +1183,7 @@ private enum ScreenshotExport {
 
 private struct FrameSection: View {
     let frame: CGRect
+    let safeAreaInsets: InspectCore.EdgeInsets?
 
     var body: some View {
         GroupBox {
@@ -734,6 +1195,17 @@ private struct FrameSection: View {
                 HStack(spacing: 12) {
                     fieldPair(label: "Width", value: frame.size.width)
                     fieldPair(label: "Height", value: frame.size.height)
+                }
+                if let safeAreaInsets {
+                    Divider()
+                    HStack(spacing: 12) {
+                        fieldPair(label: "Safe T", value: CGFloat(safeAreaInsets.top))
+                        fieldPair(label: "Safe B", value: CGFloat(safeAreaInsets.bottom))
+                    }
+                    HStack(spacing: 12) {
+                        fieldPair(label: "Safe L", value: CGFloat(safeAreaInsets.left))
+                        fieldPair(label: "Safe R", value: CGFloat(safeAreaInsets.right))
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -6,6 +6,8 @@ struct PreferencesView: View {
     @EnvironmentObject var model: InspectAppModel
     @AppStorage(UserPreferences.Keys.screenshotJPEGQuality)
     private var screenshotJPEGQuality: Double = 0.7
+    @State private var figmaToken: String = FigmaTokenStore.load() ?? ""
+    @State private var didSaveFigmaToken: Bool = false
 
     var body: some View {
         Form {
@@ -49,8 +51,43 @@ struct PreferencesView: View {
             } header: {
                 Text("Screenshot")
             }
+
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    SecureField("Personal Access Token", text: $figmaToken)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button("Save") {
+                            FigmaTokenStore.save(figmaToken)
+                            didSaveFigmaToken = true
+                        }
+                        .disabled(figmaToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Clear") {
+                            figmaToken = ""
+                            FigmaTokenStore.delete()
+                            didSaveFigmaToken = false
+                        }
+                        // Stays enabled while a token is stored even if the
+                        // input field is empty — otherwise users have no way
+                        // to remove a previously-saved token from Keychain.
+                        Spacer()
+                        if didSaveFigmaToken {
+                            Text("Saved to Keychain")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Issue a token at Figma → Settings → Security → Personal access tokens. `file_content:read` is enough. Saved to Keychain.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Figma")
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 240)
+        .frame(width: 460, height: 380)
     }
 }

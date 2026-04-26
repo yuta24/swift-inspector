@@ -279,6 +279,47 @@ final class ViewNodeTests: XCTestCase {
         XCTAssertEqual(typography.descender, 0)
     }
 
+    func testSafeAreaInsetsRoundtrip() throws {
+        let insets = EdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
+        let node = ViewNode(
+            className: "UIWindow",
+            frame: CGRect(x: 0, y: 0, width: 393, height: 852),
+            safeAreaInsets: insets
+        )
+        let serializer = JSONMessageSerializer()
+        let data = try serializer.encode(.hierarchy(roots: [node]))
+        let decoded = try serializer.decode(data)
+        guard case let .hierarchy(roots) = decoded else {
+            XCTFail("expected hierarchy case")
+            return
+        }
+        XCTAssertEqual(roots.first?.safeAreaInsets, insets)
+    }
+
+    func testLegacyDecodeWithoutSafeAreaInsets() throws {
+        // Older servers don't ship `safeAreaInsets`. Missing must decode as
+        // nil rather than failing.
+        let node = ViewNode(
+            className: "UIView",
+            frame: CGRect(x: 0, y: 0, width: 100, height: 100)
+        )
+        let encoded = try JSONEncoder().encode(node)
+        var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        json.removeValue(forKey: "safeAreaInsets")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try JSONDecoder().decode(ViewNode.self, from: stripped)
+        XCTAssertNil(decoded.safeAreaInsets)
+    }
+
+    func testEdgeInsetsNaNSanitization() {
+        let insets = EdgeInsets(top: .nan, left: .infinity, bottom: -.infinity, right: 8)
+        XCTAssertEqual(insets.top, 0)
+        XCTAssertEqual(insets.left, 0)
+        XCTAssertEqual(insets.bottom, 0)
+        XCTAssertEqual(insets.right, 8)
+    }
+
     func testRGBAColorHexFormats() {
         let opaque = RGBAColor(red: 1, green: 0.5, blue: 0, alpha: 1)
         XCTAssertEqual(opaque.hexRGB, "#FF8000")

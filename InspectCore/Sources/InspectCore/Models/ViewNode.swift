@@ -29,6 +29,12 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
     public let accessibilityIdentifier: String?
     public let accessibilityLabel: String?
 
+    /// `view.safeAreaInsets` for UIWindow and UIViewController root views.
+    /// Nil for regular subviews and for servers that pre-date this field —
+    /// the macOS client uses it to align Figma frames against the iOS
+    /// device chrome (status bar / Dynamic Island / home indicator).
+    public let safeAreaInsets: EdgeInsets?
+
     // MARK: Layer properties
     public let clipsToBounds: Bool
     public let cornerRadius: Double
@@ -75,6 +81,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         backgroundColor: RGBAColor? = nil,
         accessibilityIdentifier: String? = nil,
         accessibilityLabel: String? = nil,
+        safeAreaInsets: EdgeInsets? = nil,
         clipsToBounds: Bool = false,
         cornerRadius: Double = 0,
         borderWidth: Double = 0,
@@ -101,6 +108,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         self.backgroundColor = backgroundColor
         self.accessibilityIdentifier = accessibilityIdentifier
         self.accessibilityLabel = accessibilityLabel
+        self.safeAreaInsets = safeAreaInsets
         self.clipsToBounds = clipsToBounds
         self.cornerRadius = Self.sanitize(cornerRadius)
         self.borderWidth = Self.sanitize(borderWidth)
@@ -123,6 +131,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         case ident, className, frame, windowFrame, boundsOrigin, boundsSize, cornersInWindow
         case isHidden, alpha
         case backgroundColor, accessibilityIdentifier, accessibilityLabel
+        case safeAreaInsets
         case clipsToBounds, cornerRadius, borderWidth, borderColor
         case contentMode, isUserInteractionEnabled, isEnabled
         case properties, typography, constraints, screenshot, soloScreenshot, children
@@ -142,6 +151,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
         let backgroundColor = try c.decodeIfPresent(RGBAColor.self, forKey: .backgroundColor)
         let accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
         let accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
+        let safeAreaInsets = try c.decodeIfPresent(EdgeInsets.self, forKey: .safeAreaInsets)
         let clipsToBounds = try c.decode(Bool.self, forKey: .clipsToBounds)
         let cornerRadius = try c.decode(Double.self, forKey: .cornerRadius)
         let borderWidth = try c.decode(Double.self, forKey: .borderWidth)
@@ -169,6 +179,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             backgroundColor: backgroundColor,
             accessibilityIdentifier: accessibilityIdentifier,
             accessibilityLabel: accessibilityLabel,
+            safeAreaInsets: safeAreaInsets,
             clipsToBounds: clipsToBounds,
             cornerRadius: cornerRadius,
             borderWidth: borderWidth,
@@ -214,6 +225,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             backgroundColor: backgroundColor,
             accessibilityIdentifier: accessibilityIdentifier,
             accessibilityLabel: accessibilityLabel,
+            safeAreaInsets: safeAreaInsets,
             clipsToBounds: clipsToBounds,
             cornerRadius: cornerRadius,
             borderWidth: borderWidth,
@@ -244,6 +256,7 @@ public struct ViewNode: Codable, Identifiable, Hashable, Sendable {
             backgroundColor: backgroundColor,
             accessibilityIdentifier: accessibilityIdentifier,
             accessibilityLabel: accessibilityLabel,
+            safeAreaInsets: safeAreaInsets,
             clipsToBounds: clipsToBounds,
             cornerRadius: cornerRadius,
             borderWidth: borderWidth,

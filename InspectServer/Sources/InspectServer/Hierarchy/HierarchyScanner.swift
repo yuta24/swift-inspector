@@ -239,6 +239,23 @@ enum HierarchyScanner {
 
         let constraints = Self.extractConstraints(from: view)
 
+        // Only window roots and view-controller root views carry meaningful
+        // safe-area data. Recording it for arbitrary subviews would either
+        // be zero or inherited from a containing scroll view — neither helps
+        // the macOS client align Figma frames against device chrome.
+        let safeAreaInsets: InspectCore.EdgeInsets? = {
+            let isWindow = view is UIWindow
+            let isViewControllerRoot = (view.next as? UIViewController)?.view === view
+            guard isWindow || isViewControllerRoot else { return nil }
+            let i = view.safeAreaInsets
+            return InspectCore.EdgeInsets(
+                top: Double(i.top),
+                left: Double(i.left),
+                bottom: Double(i.bottom),
+                right: Double(i.right)
+            )
+        }()
+
         return ViewNode(
             ident: nodeIdent,
             className: Self.className(of: view),
@@ -252,6 +269,7 @@ enum HierarchyScanner {
             backgroundColor: view.backgroundColor.flatMap(RGBAColor.init(uiColor:)),
             accessibilityIdentifier: accID,
             accessibilityLabel: accLabel,
+            safeAreaInsets: safeAreaInsets,
             clipsToBounds: view.clipsToBounds,
             cornerRadius: Double(view.layer.cornerRadius),
             borderWidth: Double(view.layer.borderWidth),
