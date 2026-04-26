@@ -1,6 +1,5 @@
 import Foundation
 import Combine
-import Network
 import InspectCore
 import os.log
 
@@ -16,6 +15,22 @@ enum LiveTransport: Equatable {
     case poll
 }
 
+/// View-facing facade for the InspectApp UI.
+///
+/// The model intentionally keeps a wide surface of `@Published` properties so
+/// SwiftUI views can bind directly. The actual machinery is split across two
+/// helpers it owns:
+///
+/// - ``ConnectionController`` runs the Bonjour browser, the per-peer
+///   `InspectClient`, and the handshake / pairing handshake. It signals
+///   relevant transitions back here through callbacks.
+/// - ``LiveModeController`` owns the live-update loop (push subscription or
+///   polling timer) and the transport-change publication.
+///
+/// What stays here is the *UI* layer: published state, selection / focus /
+/// measurement remapping across snapshots, and the small handful of
+/// orchestration steps (inflight bookkeeping, post-pair hierarchy fetch,
+/// highlight push) that need to coordinate between the two helpers.
 @MainActor
 final class InspectAppModel: ObservableObject {
     @Published var discovered: [InspectEndpoint] = []
@@ -56,8 +71,7 @@ final class InspectAppModel: ObservableObject {
     /// while `isLiveMode` is false.
     @Published var liveTransport: LiveTransport = .none
     /// True while a `requestHierarchy` has been sent but the response hasn't
-    /// arrived yet. Surfaced to the UI so the toolbar can show a spinner —
-    /// previously private, now published for that purpose.
+    /// arrived yet. Surfaced to the UI so the toolbar can show a spinner.
     @Published private(set) var isInflight: Bool = false
     /// Endpoint the live connection is bound to. Diverges from
     /// `selectedEndpointID` when the Picker is staging a different choice —
@@ -73,42 +87,27 @@ final class InspectAppModel: ObservableObject {
     /// tree are harmless — they just don't resolve.
     @Published var expandedPaths: Set<String> = []
 
-    private let browser = InspectBrowser()
-    private var client: InspectClient?
+    private let connection = ConnectionController()
+    private lazy var live: LiveModeController = LiveModeController(
+        send: { [weak self] message in self?.connection.send(message) },
+        requestSnapshot: { [weak self] in self?.requestHierarchy(lite: true) }
+    )
+
     private var highlightCancellable: AnyCancellable?
-    /// Protocol version advertised by the peer's handshake. Nil until handshake
-    /// arrives. Used to decide whether live mode can use push subscription
-    /// (v3+) or must fall back to client-side polling.
-    private var serverProtocolVersion: Int?
-    /// True when we've told the server to push updates (protocol v3+). Used
-    /// so we can send a matching `unsubscribeUpdates` on live-off / disconnect.
-    private var isSubscribed: Bool = false
-    private var liveTimer: Timer?
     /// Wall-clock time of the last `requestHierarchy` send. If a response
     /// never arrives (dropped connection, device paused in debugger) we
     /// don't want `isInflight` to latch forever and stall live mode.
     private var inflightSentAt: Date?
     private static let inflightTimeout: TimeInterval = 5.0
-    /// Upper bound on how long `isConnecting` may stay true without either
-    /// `onConnected` or `onDisconnected` firing. NWConnection can sit in
-    /// `.waiting` indefinitely on flaky networks, which would otherwise
-    /// latch the "Connecting…" spinner forever.
-    private static let connectingTimeout: TimeInterval = 10.0
-    /// Upper bound on how long we wait for the device user to approve a
-    /// pair request. Generous because the device is the user's other hand —
-    /// they may need to unlock it, dismiss a different alert, or walk over
-    /// to it. After this we surface an explicit timeout so the Mac client
-    /// doesn't sit silently forever.
-    private static let pairApprovalTimeout: TimeInterval = 60.0
 
     var selectedNode: ViewNode? {
         guard let id = selectedNodeID else { return nil }
-        return Self.findNode(id: id, in: roots)
+        return HierarchyRemapping.findNode(id: id, in: roots)
     }
 
     var focusedNode: ViewNode? {
         guard let id = focusedNodeID else { return nil }
-        return Self.findNode(id: id, in: roots)
+        return HierarchyRemapping.findNode(id: id, in: roots)
     }
 
     /// Nodes the tree and 3D scene render. When a focus is set, only the
@@ -138,7 +137,7 @@ final class InspectAppModel: ObservableObject {
 
     var measurementReferenceNode: ViewNode? {
         guard let id = measurementReferenceID else { return nil }
-        return Self.findNode(id: id, in: roots)
+        return HierarchyRemapping.findNode(id: id, in: roots)
     }
 
     /// The "compare" node currently shown alongside the selection. Option-hover
@@ -147,7 +146,7 @@ final class InspectAppModel: ObservableObject {
     /// pinned reference (if any) reappears.
     var measurementCompareNode: ViewNode? {
         if let id = measurementHoverID,
-           let node = Self.findNode(id: id, in: roots) {
+           let node = HierarchyRemapping.findNode(id: id, in: roots) {
             return node
         }
         return measurementReferenceNode
@@ -164,140 +163,42 @@ final class InspectAppModel: ObservableObject {
     }
 
     init() {
-        highlightCancellable = $selectedNodeID
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] nodeID in
-                guard let self, self.isConnected else { return }
-                self.client?.send(.highlightView(ident: nodeID))
-            }
+        wireConnectionCallbacks()
+        wireLiveCallbacks()
+        wireHighlightSubscription()
     }
 
     func startBrowsing() {
-        browser.onChange = { [weak self] endpoints in
-            Task { @MainActor in
-                guard let self else { return }
-                let merged = endpoints.map { endpoint -> InspectEndpoint in
-                    var copy = endpoint
-                    if copy.id == self.connectedEndpointID {
-                        copy.isConnected = true
-                    }
-                    return copy
-                }
-                self.discovered = merged
-            }
-        }
-        browser.start()
-        status = "browsing"
+        connection.startBrowsing()
     }
 
     func connect(to endpoint: InspectEndpoint) {
-        disconnect()
         connectionError = nil
-        let client = InspectClient()
-        client.onStatus = { [weak self] message in
-            Task { @MainActor in self?.status = message }
-        }
-        client.onConnected = { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isConnected = true
-                self.isConnecting = false
-                self.connectedEndpointID = endpoint.id
-                self.markConnected(endpointID: endpoint.id)
-                // Don't request the hierarchy yet — we wait for the
-                // server's handshake so we can decide whether pairing is
-                // required (protocol >= 4) or skip it (older servers).
-            }
-        }
-        client.onFailed = { [weak self] error in
-            Task { @MainActor in
-                self?.connectionError = error.localizedDescription
-            }
-        }
-        client.onDisconnected = { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isConnected = false
-                self.isConnecting = false
-                self.isAwaitingPairApproval = false
-                self.isInflight = false
-                self.inflightSentAt = nil
-                self.isLiveMode = false
-                self.stopLiveTimer()
-                self.isSubscribed = false
-                self.liveTransport = .none
-                self.serverProtocolVersion = nil
-                self.connectedEndpointID = nil
-                self.markConnected(endpointID: nil)
-                self.resetCapturedState()
-            }
-        }
-        client.onMessage = { [weak self] message in
-            Task { @MainActor in self?.handle(message) }
-        }
-        isConnecting = true
-        client.connect(to: endpoint.endpoint)
-        self.client = client
+        connection.connect(to: endpoint)
         status = "connecting to \(endpoint.name)"
-        scheduleConnectingAutoClear(for: client)
     }
 
     func disconnect() {
-        // Detach callbacks on the old client before cancelling its
-        // NWConnection. Otherwise a late `.cancelled` state transition
-        // from the dying connection would dispatch an async Task that
-        // clobbers the NEXT connection's state (e.g. the user rapidly
-        // switching devices would see the new spinner disappear mid-
-        // connect).
-        client?.onStatus = nil
-        client?.onConnected = nil
-        client?.onDisconnected = nil
-        client?.onFailed = nil
-        client?.onMessage = nil
-
-        stopLiveTimer()
-        if isSubscribed {
-            client?.send(.unsubscribeUpdates)
-            isSubscribed = false
+        // Drop live mode before tearing down the socket so the controller
+        // can send a clean `unsubscribeUpdates` while the connection is
+        // still alive.
+        if isLiveMode {
+            isLiveMode = false
         }
-        isLiveMode = false
-        liveTransport = .none
-        isInflight = false
-        inflightSentAt = nil
-        isConnecting = false
-        isAwaitingPairApproval = false
-        serverProtocolVersion = nil
-        client?.send(.highlightView(ident: nil))
-        client?.disconnect()
-        client = nil
-        isConnected = false
-        connectedEndpointID = nil
-        connectedDeviceName = ""
-        markConnected(endpointID: nil)
-        resetCapturedState()
+        live.stop()
+        connection.disconnect()
+        // Mirror the user-initiated path: we want a deterministic UI state
+        // even before the late `.cancelled` callback lands.
+        finalizeDisconnectState()
         // User-initiated disconnect detaches onStatus first, so the
         // client's own `.cancelled` transition no longer drives the label.
         // Reflect the new idle-but-still-discovering state explicitly.
         status = "browsing"
     }
 
-    /// Clears everything derived from a captured hierarchy so the detail,
-    /// sidebar tree, and measurement overlays don't linger after the
-    /// connection closes. Connection-level flags (`isConnected`, timers,
-    /// subscriptions) are owned by the surrounding teardown paths.
-    private func resetCapturedState() {
-        roots = []
-        selectedNodeID = nil
-        focusedNodeID = nil
-        measurementReferenceID = nil
-        measurementHoverID = nil
-        expandedPaths = []
-    }
-
     func shutdown() {
         disconnect()
-        browser.stop()
+        connection.shutdown()
         status = "idle"
     }
 
@@ -309,22 +210,183 @@ final class InspectAppModel: ObservableObject {
         let sentAt = Date()
         isInflight = true
         inflightSentAt = sentAt
-        client?.send(lite ? .requestHierarchyLite : .requestHierarchy)
+        connection.send(lite ? .requestHierarchyLite : .requestHierarchy)
         scheduleInflightAutoClear(for: sentAt)
     }
 
-    /// Clears `isConnecting` if the specified client is still the active one
-    /// after the timeout. Capturing the client identity prevents a rapid
-    /// reconnect from being tripped by the previous attempt's timeout.
-    private func scheduleConnectingAutoClear(for client: InspectClient) {
-        let deadlineNs = UInt64(Self.connectingTimeout * 1_000_000_000)
-        Task { @MainActor [weak self, weak client] in
-            try? await Task.sleep(nanoseconds: deadlineNs)
-            guard let self, let client, self.client === client else { return }
-            if self.isConnecting {
-                self.isConnecting = false
+    func toggleLiveMode() {
+        isLiveMode.toggle()
+        if isLiveMode {
+            startLive()
+        } else {
+            live.stop()
+        }
+    }
+
+    func setLiveInterval(_ interval: TimeInterval) {
+        liveInterval = interval
+        live.setInterval(interval)
+    }
+
+    func highlightSelectedNode() {
+        connection.send(.highlightView(ident: selectedNodeID))
+    }
+
+    func clearHighlight() {
+        connection.send(.highlightView(ident: nil))
+    }
+
+    /// Sends the user's current capture preferences to the connected server.
+    /// No-op when the server is too old to understand the message (protocol
+    /// < 5) — those servers would reject it at decode time and surface an
+    /// error in the status bar. Safe to call any time after pair approval;
+    /// each call replaces the server-side options wholesale.
+    func sendCurrentOptionsIfSupported() {
+        guard let version = connection.serverProtocolVersion,
+              version >= InspectProtocol.optionsMinVersion else {
+            return
+        }
+        let options = InspectMessage.SnapshotOptions(
+            screenshotJPEGQuality: UserPreferences.screenshotJPEGQuality
+        )
+        connection.send(.setOptions(options))
+    }
+
+    // MARK: - Callback wiring
+
+    private func wireConnectionCallbacks() {
+        connection.onDiscoveredChanged = { [weak self] endpoints in
+            guard let self else { return }
+            let merged = endpoints.map { endpoint -> InspectEndpoint in
+                var copy = endpoint
+                if copy.id == self.connectedEndpointID {
+                    copy.isConnected = true
+                }
+                return copy
+            }
+            self.discovered = merged
+        }
+        connection.onStatus = { [weak self] message in
+            self?.status = message
+        }
+        connection.onConnectingChanged = { [weak self] flag in
+            self?.isConnecting = flag
+        }
+        connection.onConnected = { [weak self] endpoint in
+            guard let self else { return }
+            self.isConnected = true
+            self.connectedEndpointID = endpoint.id
+            self.markConnected(endpointID: endpoint.id)
+        }
+        connection.onDisconnected = { [weak self] in
+            self?.finalizeDisconnectState()
+        }
+        connection.onConnectionError = { [weak self] reason in
+            self?.connectionError = reason
+        }
+        connection.onHandshake = { [weak self] handshake, label in
+            guard let self else { return }
+            self.connectedDeviceName = label
+            // Pre-v4 servers don't pair: the handshake itself is the green
+            // light to start fetching hierarchies. v4+ peers wait for
+            // `onPairOutcome(.approved)` instead.
+            if handshake.protocolVersion < InspectProtocol.pairingMinVersion {
+                self.status = "connected: \(handshake.deviceName)"
+                self.requestHierarchy()
             }
         }
+        connection.onAwaitingPairChanged = { [weak self] flag in
+            self?.isAwaitingPairApproval = flag
+        }
+        connection.onPairOutcome = { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .approved:
+                self.status = "connected: \(self.connectedDeviceName)"
+                self.sendCurrentOptionsIfSupported()
+                self.requestHierarchy()
+            case let .rejected(reason):
+                self.connectionError = reason
+                self.status = "rejected: \(reason)"
+                // The server cancels the socket itself after sending the
+                // rejection; calling disconnect() here makes the teardown
+                // deterministic from the UI side and clears the live timer
+                // before the late `.cancelled` callback arrives.
+                self.disconnect()
+            }
+        }
+        connection.onPairTimeout = { [weak self] in
+            guard let self else { return }
+            self.connectionError = String(localized: "Device did not approve in time")
+            self.status = "pair timeout"
+            self.disconnect()
+        }
+        connection.onMessage = { [weak self] message in
+            self?.handle(message)
+        }
+    }
+
+    private func wireLiveCallbacks() {
+        live.onTransportChanged = { [weak self] transport in
+            self?.liveTransport = transport
+        }
+    }
+
+    private func wireHighlightSubscription() {
+        highlightCancellable = $selectedNodeID
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] nodeID in
+                guard let self, self.isConnected else { return }
+                self.connection.send(.highlightView(ident: nodeID))
+            }
+    }
+
+    // MARK: - State helpers
+
+    /// Resets the published transient state that should not survive a
+    /// disconnect, regardless of whether the disconnect was initiated by the
+    /// user, the peer, or a connection failure.
+    private func finalizeDisconnectState() {
+        isConnected = false
+        isLiveMode = false
+        live.stop()
+        isInflight = false
+        inflightSentAt = nil
+        connectedEndpointID = nil
+        connectedDeviceName = ""
+        markConnected(endpointID: nil)
+        resetCapturedState()
+    }
+
+    /// Clears everything derived from a captured hierarchy so the detail,
+    /// sidebar tree, and measurement overlays don't linger after the
+    /// connection closes.
+    private func resetCapturedState() {
+        roots = []
+        selectedNodeID = nil
+        focusedNodeID = nil
+        measurementReferenceID = nil
+        measurementHoverID = nil
+        expandedPaths = []
+    }
+
+    private func markConnected(endpointID: InspectEndpoint.ID?) {
+        discovered = discovered.map { endpoint in
+            var copy = endpoint
+            copy.isConnected = (endpoint.id == endpointID)
+            return copy
+        }
+    }
+
+    /// Starts live updates using the best mechanism the connected server
+    /// supports: subscribe-push (v3+) when available, client-side polling
+    /// otherwise. `liveInterval` seeds the minimum update interval on the
+    /// server so the user's presets still act as a rate limit.
+    private func startLive() {
+        guard isConnected else { return }
+        let supportsPush = (connection.serverProtocolVersion ?? 0) >= InspectProtocol.subscribeUpdatesMinVersion
+        live.start(supportsPush: supportsPush, intervalSec: liveInterval)
     }
 
     /// Clears `isInflight` if the matching request is still outstanding after
@@ -343,113 +405,12 @@ final class InspectAppModel: ObservableObject {
         }
     }
 
-    func toggleLiveMode() {
-        isLiveMode.toggle()
-        if isLiveMode {
-            startLive()
-        } else {
-            stopLive()
-        }
-    }
-
-    /// Starts live updates using the best mechanism the connected server
-    /// supports: subscribe-push (v3+) when available, client-side polling
-    /// otherwise. `liveInterval` seeds the minimum update interval on the
-    /// server so the user's presets still act as a rate limit.
-    private func startLive() {
-        guard isConnected else { return }
-        if let version = serverProtocolVersion,
-           version >= InspectProtocol.subscribeUpdatesMinVersion {
-            sendSubscribe()
-            liveTransport = .push
-        } else {
-            startLiveTimer()
-            liveTransport = .poll
-        }
-    }
-
-    private func stopLive() {
-        stopLiveTimer()
-        if isSubscribed {
-            client?.send(.unsubscribeUpdates)
-            isSubscribed = false
-        }
-        liveTransport = .none
-    }
-
-    private func sendSubscribe() {
-        let intervalMs = Int((liveInterval * 1000).rounded())
-        client?.send(.subscribeUpdates(intervalMs: intervalMs))
-        isSubscribed = true
-    }
-
-    private func startLiveTimer() {
-        stopLiveTimer()
-        guard isConnected else { return }
-        let timer = Timer.scheduledTimer(withTimeInterval: liveInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.isLiveMode, self.isConnected else { return }
-                self.requestHierarchy(lite: true)
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        liveTimer = timer
-    }
-
-    func setLiveInterval(_ interval: TimeInterval) {
-        liveInterval = interval
-        guard isLiveMode else { return }
-        if isSubscribed {
-            // Re-subscribe with the new interval so the server's rate limit
-            // follows the user's preset.
-            client?.send(.unsubscribeUpdates)
-            isSubscribed = false
-            sendSubscribe()
-        } else {
-            startLiveTimer()
-        }
-    }
-
-    private func stopLiveTimer() {
-        liveTimer?.invalidate()
-        liveTimer = nil
-    }
-
-    func highlightSelectedNode() {
-        client?.send(.highlightView(ident: selectedNodeID))
-    }
-
-    func clearHighlight() {
-        client?.send(.highlightView(ident: nil))
-    }
-
-    /// Sends the user's current capture preferences to the connected server.
-    /// No-op when the server is too old to understand the message (protocol
-    /// < 5) — those servers would reject it at decode time and surface an
-    /// error in the status bar. Safe to call any time after pair approval;
-    /// each call replaces the server-side options wholesale.
-    func sendCurrentOptionsIfSupported() {
-        guard let version = serverProtocolVersion,
-              version >= InspectProtocol.optionsMinVersion else {
-            return
-        }
-        let options = InspectMessage.SnapshotOptions(
-            screenshotJPEGQuality: UserPreferences.screenshotJPEGQuality
-        )
-        client?.send(.setOptions(options))
-    }
+    // MARK: - Message handling
 
     private func handle(_ message: InspectMessage) {
         switch message {
-        case let .handshake(handshake):
-            logger.info("Model received handshake: \(handshake.deviceName, privacy: .public) \(handshake.systemName, privacy: .public) \(handshake.systemVersion, privacy: .public) protocol=\(handshake.protocolVersion)")
-            connectedDeviceName = "\(handshake.deviceName) — \(handshake.systemName) \(handshake.systemVersion)"
-            serverProtocolVersion = handshake.protocolVersion
-            beginPairingIfNeeded(for: handshake)
-        case let .pairResult(outcome):
-            handlePairResult(outcome)
         case let .hierarchy(newRoots):
-            let nodeCount = Self.countNodes(in: newRoots)
+            let nodeCount = HierarchyRemapping.countNodes(in: newRoots)
             logger.info("Model received hierarchy: \(newRoots.count) root(s), \(nodeCount) total node(s)")
             isInflight = false
             inflightSentAt = nil
@@ -459,98 +420,40 @@ final class InspectAppModel: ObservableObject {
             isInflight = false
             inflightSentAt = nil
             status = "error: \(message)"
-        case .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView, .setOptions:
+        case .handshake, .pairResult, .requestPair, .requestHierarchy, .requestHierarchyLite, .subscribeUpdates, .unsubscribeUpdates, .highlightView, .setOptions:
+            // handshake/pairResult are consumed inside ConnectionController.
+            // Outbound message cases never appear here.
             break
         }
     }
 
-    /// Decides between the v4 pair flow and the legacy "request hierarchy
-    /// immediately" path based on the server's advertised protocol version.
-    /// Pre-v4 servers don't understand `requestPair`, so sending it would
-    /// just earn an `error("decode failed")` — fall back to the old behavior
-    /// instead so older devices still work after an InspectApp upgrade.
-    private func beginPairingIfNeeded(for handshake: InspectMessage.Handshake) {
-        if handshake.protocolVersion >= InspectProtocol.pairingMinVersion {
-            isAwaitingPairApproval = true
-            status = String(localized: "Approve the connection on the device…")
-            let identity = ClientIdentityStore.current()
-            client?.send(.requestPair(identity))
-            schedulePairTimeout(for: client)
-        } else {
-            status = "connected: \(handshake.deviceName)"
-            requestHierarchy()
-        }
-    }
-
-    private func handlePairResult(_ outcome: InspectMessage.PairOutcome) {
-        isAwaitingPairApproval = false
-        switch outcome {
-        case .approved:
-            logger.info("Pair approved")
-            status = "connected: \(connectedDeviceName)"
-            sendCurrentOptionsIfSupported()
-            requestHierarchy()
-        case let .rejected(reason):
-            logger.info("Pair rejected: \(reason, privacy: .public)")
-            connectionError = reason
-            status = "rejected: \(reason)"
-            // The server cancels the socket itself after sending the
-            // rejection; calling disconnect() here makes the teardown
-            // deterministic from the UI side and clears the live timer
-            // before the late `.cancelled` callback arrives.
-            disconnect()
-        }
-    }
-
-    /// Bails out of the pair-waiting state if the device user never
-    /// responds. Without this the "デバイス側で承認してください…" banner
-    /// would stay up forever and the user would think the app is hung.
-    private func schedulePairTimeout(for client: InspectClient?) {
-        let deadlineNs = UInt64(Self.pairApprovalTimeout * 1_000_000_000)
-        Task { @MainActor [weak self, weak client] in
-            try? await Task.sleep(nanoseconds: deadlineNs)
-            guard let self, let client, self.client === client else { return }
-            guard self.isAwaitingPairApproval else { return }
-            self.isAwaitingPairApproval = false
-            self.connectionError = String(localized: "Device did not approve in time")
-            self.status = "pair timeout"
-            self.disconnect()
-        }
-    }
-
     /// Replaces `roots` with `newRoots` while re-mapping `selectedNodeID`,
-    /// `measurementReferenceID`, and `measurementHoverID` across the new tree.
-    ///
-    /// Every capture by `HierarchyScanner` assigns fresh UUIDs, so we can't
-    /// use ident equality across snapshots. Instead we compute a *stable path*
-    /// (accessibility-identifier or class-and-sibling-index chain) for each
-    /// previously-tracked node in the old tree, then look up the same path in
-    /// the new tree to recover its new UUID. This is what lets live mode tick
-    /// without blowing away the user's selection on every update.
+    /// `measurementReferenceID`, `measurementHoverID`, and `focusedNodeID`
+    /// across the new tree.
     private func applyHierarchyPreservingSelection(newRoots: [ViewNode]) {
         let oldRoots = self.roots
 
         // Carry screenshots forward from the previous snapshot when the new
         // one came back without them (lite capture path). Without this, the
         // 3D scene would render blank planes on every live tick.
-        let mergedRoots = Self.carryingScreenshots(into: newRoots, from: oldRoots)
+        let mergedRoots = HierarchyRemapping.carryingScreenshots(into: newRoots, from: oldRoots)
 
-        let preservedSelectionID = Self.remap(
+        let preservedSelectionID = HierarchyRemapping.remap(
             id: selectedNodeID,
             oldRoots: oldRoots,
             newRoots: mergedRoots
         )
-        let preservedReferenceID = Self.remap(
+        let preservedReferenceID = HierarchyRemapping.remap(
             id: measurementReferenceID,
             oldRoots: oldRoots,
             newRoots: mergedRoots
         )
-        let preservedHoverID = Self.remap(
+        let preservedHoverID = HierarchyRemapping.remap(
             id: measurementHoverID,
             oldRoots: oldRoots,
             newRoots: mergedRoots
         )
-        let preservedFocusID = Self.remap(
+        let preservedFocusID = HierarchyRemapping.remap(
             id: focusedNodeID,
             oldRoots: oldRoots,
             newRoots: mergedRoots
@@ -565,152 +468,12 @@ final class InspectAppModel: ObservableObject {
 
         if let preservedSelectionID {
             selectedNodeID = preservedSelectionID
-        } else if selectedNodeID.flatMap({ Self.findNode(id: $0, in: mergedRoots) }) == nil {
+        } else if selectedNodeID.flatMap({ HierarchyRemapping.findNode(id: $0, in: mergedRoots) }) == nil {
             // While focused, prefer the focused node as the default selection
             // so the fallback doesn't jump to a root the user can't see.
             selectedNodeID = preservedFocusID ?? mergedRoots.first?.id
         }
         measurementReferenceID = preservedReferenceID
         measurementHoverID = preservedHoverID
-    }
-
-    private func markConnected(endpointID: InspectEndpoint.ID?) {
-        discovered = discovered.map { endpoint in
-            var copy = endpoint
-            copy.isConnected = (endpoint.id == endpointID)
-            return copy
-        }
-    }
-
-    private static func countNodes(in nodes: [ViewNode]) -> Int {
-        nodes.reduce(0) { $0 + 1 + countNodes(in: $1.children) }
-    }
-
-    private static func findNode(id: UUID, in nodes: [ViewNode]) -> ViewNode? {
-        for node in nodes {
-            if node.id == id { return node }
-            if let found = findNode(id: id, in: node.children) { return found }
-        }
-        return nil
-    }
-
-    // MARK: Stable path remapping
-
-    /// Re-maps an id from the previous snapshot onto the new one using a
-    /// path-based fingerprint. Returns nil when the path doesn't exist in
-    /// the new tree (e.g. the view was removed).
-    static func remap(
-        id: UUID?,
-        oldRoots: [ViewNode],
-        newRoots: [ViewNode]
-    ) -> UUID? {
-        guard let id else { return nil }
-        guard let path = stablePath(for: id, in: oldRoots) else { return nil }
-        return findNode(byPath: path, in: newRoots)?.id
-    }
-
-    /// Walks the tree to find the stable path (list of sibling-index or
-    /// accessibility-identifier segments) that uniquely locates a node with
-    /// the given `ident`. Uses `ViewNode.stablePathSegment` for per-node
-    /// segments so SceneKit diffing and selection preservation agree on the
-    /// same identity scheme.
-    static func stablePath(for id: UUID, in roots: [ViewNode]) -> [String]? {
-        for (index, root) in roots.enumerated() {
-            if let path = path(to: id, in: root, prefix: [root.stablePathSegment(siblingIndex: index)]) {
-                return path
-            }
-        }
-        return nil
-    }
-
-    private static func path(
-        to id: UUID,
-        in node: ViewNode,
-        prefix: [String]
-    ) -> [String]? {
-        if node.id == id { return prefix }
-        for (index, child) in node.children.enumerated() {
-            let next = prefix + [child.stablePathSegment(siblingIndex: index)]
-            if let found = path(to: id, in: child, prefix: next) { return found }
-        }
-        return nil
-    }
-
-    // MARK: Screenshot carry-over
-
-    /// For live mode: the server omits screenshot payloads to keep captures
-    /// cheap. We reattach images from the previous snapshot by matching nodes
-    /// along the same stable path. A node that existed before keeps its old
-    /// image until the next full refresh; newly-added nodes stay blank until
-    /// the user triggers a full refresh (Cmd+R).
-    static func carryingScreenshots(into newRoots: [ViewNode], from oldRoots: [ViewNode]) -> [ViewNode] {
-        var cache: [String: (Data?, Data?)] = [:]
-        collectImages(from: oldRoots, prefix: [], into: &cache)
-        if cache.isEmpty { return newRoots }
-        return newRoots.enumerated().map { index, root in
-            rebuild(
-                node: root,
-                path: [root.stablePathSegment(siblingIndex: index)],
-                cache: cache
-            )
-        }
-    }
-
-    private static func collectImages(
-        from nodes: [ViewNode],
-        prefix: [String],
-        into cache: inout [String: (Data?, Data?)]
-    ) {
-        for (index, node) in nodes.enumerated() {
-            let path = prefix + [node.stablePathSegment(siblingIndex: index)]
-            if node.screenshot != nil || node.soloScreenshot != nil {
-                cache[path.joined(separator: "/")] = (node.screenshot, node.soloScreenshot)
-            }
-            collectImages(from: node.children, prefix: path, into: &cache)
-        }
-    }
-
-    private static func rebuild(
-        node: ViewNode,
-        path: [String],
-        cache: [String: (Data?, Data?)]
-    ) -> ViewNode {
-        let rebuiltChildren = node.children.enumerated().map { index, child in
-            rebuild(
-                node: child,
-                path: path + [child.stablePathSegment(siblingIndex: index)],
-                cache: cache
-            )
-        }
-
-        // Only borrow images when the new node didn't carry any itself
-        // (i.e. this was a lite capture, not a fresh full capture).
-        if node.screenshot == nil && node.soloScreenshot == nil,
-           let (oldScreenshot, oldSolo) = cache[path.joined(separator: "/")] {
-            return node
-                .replacingChildren(rebuiltChildren)
-                .replacingImages(screenshot: oldScreenshot, soloScreenshot: oldSolo)
-        }
-        return node.replacingChildren(rebuiltChildren)
-    }
-
-    static func findNode(byPath path: [String], in roots: [ViewNode]) -> ViewNode? {
-        guard let first = path.first else { return nil }
-        for (index, root) in roots.enumerated() {
-            if root.stablePathSegment(siblingIndex: index) == first {
-                return resolve(path: Array(path.dropFirst()), in: root)
-            }
-        }
-        return nil
-    }
-
-    private static func resolve(path: [String], in node: ViewNode) -> ViewNode? {
-        guard let first = path.first else { return node }
-        for (index, child) in node.children.enumerated() {
-            if child.stablePathSegment(siblingIndex: index) == first {
-                return resolve(path: Array(path.dropFirst()), in: child)
-            }
-        }
-        return nil
     }
 }
