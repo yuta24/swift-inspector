@@ -37,13 +37,63 @@ public enum HierarchyScanner {
         }
     }
 
+    /// Affine that maps a point in `layer`'s bounds coords to its parent's
+    /// bounds coords. Mirrors CoreAnimation: `T(position) ∘ R(transform) ∘ T(-anchorInBounds)`.
+    /// 3D transforms degrade to their affine projection (same as `view.convert` for
+    /// non-perspective cases).
+    private static func layerToParentTransform(_ layer: CALayer) -> CGAffineTransform {
+        let bounds = layer.bounds
+        let position = layer.position
+        let anchor = layer.anchorPoint
+        let xform = layer.affineTransform()
+        let anchorX = bounds.origin.x + bounds.size.width * anchor.x
+        let anchorY = bounds.origin.y + bounds.size.height * anchor.y
+        return CGAffineTransform(translationX: -anchorX, y: -anchorY)
+            .concatenating(xform)
+            .concatenating(CGAffineTransform(translationX: position.x, y: position.y))
+    }
+
+    /// One-time seed used when `buildNode` is invoked on a non-window root
+    /// (e.g. tests). Walks ancestors once; descendants then reuse the chain.
+    private static func layerChainToWindow(_ layer: CALayer, window: UIWindow) -> CGAffineTransform {
+        var matrix: CGAffineTransform = .identity
+        var current: CALayer? = layer
+        while let l = current, l !== window.layer {
+            matrix = matrix.concatenating(layerToParentTransform(l))
+            current = l.superlayer
+        }
+        return matrix
+    }
+
+    private static func aabb(of points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .zero }
+        var minX = first.x, maxX = first.x, minY = first.y, maxY = first.y
+        for p in points.dropFirst() {
+            if p.x < minX { minX = p.x } else if p.x > maxX { maxX = p.x }
+            if p.y < minY { minY = p.y } else if p.y > maxY { maxY = p.y }
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     static func buildNode(
         from view: UIView,
         window: UIWindow,
         windowCapture: (CGImage, CGFloat)?,
         captureScreenshots: Bool,
-        depth: Int = 0
+        depth: Int = 0,
+        // Affine transform mapping the parent's bounds coords into window
+        // coords. Composed once per recursion step so we never need to walk
+        // the ancestor chain via `view.convert(_:to:)` per node.
+        // `nil` means "this is a root call — seed by walking ancestors once."
+        parentToWindow: CGAffineTransform? = nil
     ) -> ViewNode {
+        let selfToWindow: CGAffineTransform
+        if let pt = parentToWindow {
+            selfToWindow = layerToParentTransform(view.layer).concatenating(pt)
+        } else {
+            selfToWindow = layerChainToWindow(view.layer, window: window)
+        }
+
         let groupScreenshot: Data?
         let soloScreenshot: Data?
 
@@ -90,7 +140,8 @@ public enum HierarchyScanner {
                     window: window,
                     windowCapture: windowCapture,
                     captureScreenshots: captureScreenshots,
-                    depth: depth + 1
+                    depth: depth + 1,
+                    parentToWindow: selfToWindow
                 )
             }
 
@@ -104,7 +155,8 @@ public enum HierarchyScanner {
                     window: window,
                     windowCapture: windowCapture,
                     captureScreenshots: captureScreenshots,
-                    depth: depth + 1
+                    depth: depth + 1,
+                    parentToWindow: selfToWindow
                 ))
             }
         }
@@ -128,19 +180,19 @@ public enum HierarchyScanner {
 
         let constraints = Self.extractConstraints(from: view)
 
-        // Absolute AABB in window coordinates — used for culling and as a
-        // fallback for clients that don't do the recursive origin walk.
-        let windowFrame = view.convert(view.bounds, to: window)
-
         // Four corners of bounds in window space — preserves enough 2D
         // affine information for a future renderer to rotate/skew planes.
         let b = view.bounds
         let cornersInWindow: [CGPoint] = [
-            view.convert(CGPoint(x: b.minX, y: b.minY), to: window),
-            view.convert(CGPoint(x: b.maxX, y: b.minY), to: window),
-            view.convert(CGPoint(x: b.minX, y: b.maxY), to: window),
-            view.convert(CGPoint(x: b.maxX, y: b.maxY), to: window),
+            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
         ]
+
+        // Absolute AABB in window coordinates — derived from the corners
+        // we just computed (matches what `view.convert(rect:to:)` returns).
+        let windowFrame = aabb(of: cornersInWindow)
 
         return ViewNode(
             ident: nodeIdent,
@@ -177,8 +229,16 @@ public enum HierarchyScanner {
         window: UIWindow,
         windowCapture: (CGImage, CGFloat)?,
         captureScreenshots: Bool,
-        depth: Int = 0
+        depth: Int = 0,
+        parentToWindow: CGAffineTransform? = nil
     ) -> ViewNode {
+        let selfToWindow: CGAffineTransform
+        if let pt = parentToWindow {
+            selfToWindow = layerToParentTransform(layer).concatenating(pt)
+        } else {
+            selfToWindow = layerChainToWindow(layer, window: window)
+        }
+
         let groupScreenshot: Data?
         let soloScreenshot: Data?
 
@@ -212,7 +272,8 @@ public enum HierarchyScanner {
                     window: window,
                     windowCapture: windowCapture,
                     captureScreenshots: captureScreenshots,
-                    depth: depth + 1
+                    depth: depth + 1,
+                    parentToWindow: selfToWindow
                 )
             }
             truncated = false
@@ -234,16 +295,14 @@ public enum HierarchyScanner {
 
         let nodeIdent = UUID()
 
-        // Absolute AABB in window coordinates (for culling / fallback).
-        let windowFrame = layer.convert(layer.bounds, to: window.layer)
-
         let b = layer.bounds
         let cornersInWindow: [CGPoint] = [
-            layer.convert(CGPoint(x: b.minX, y: b.minY), to: window.layer),
-            layer.convert(CGPoint(x: b.maxX, y: b.minY), to: window.layer),
-            layer.convert(CGPoint(x: b.minX, y: b.maxY), to: window.layer),
-            layer.convert(CGPoint(x: b.maxX, y: b.maxY), to: window.layer),
+            CGPoint(x: b.minX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.minY).applying(selfToWindow),
+            CGPoint(x: b.minX, y: b.maxY).applying(selfToWindow),
+            CGPoint(x: b.maxX, y: b.maxY).applying(selfToWindow),
         ]
+        let windowFrame = aabb(of: cornersInWindow)
 
         return ViewNode(
             ident: nodeIdent,

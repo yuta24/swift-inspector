@@ -226,6 +226,117 @@ final class HierarchyScannerTests: XCTestCase {
         XCTAssertEqual(corners?[3], CGPoint(x: 130, y: 130))
     }
 
+    /// A scrolled UIScrollView shifts every descendant's `bounds.origin`,
+    /// which has to be reflected in `cornersInWindow`. Compares our matrix
+    /// chain against UIKit's own `view.convert(_:to:)` so any future change
+    /// that drifts away from UIKit semantics fails immediately.
+    func test_buildNode_cornersTrackScrollContentOffset() {
+        let window = makeWindow(size: CGSize(width: 390, height: 844))
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        scroll.contentSize = CGSize(width: 390, height: 2000)
+        window.addSubview(scroll)
+        scroll.contentOffset = CGPoint(x: 0, y: 200)
+
+        let label = UIView(frame: CGRect(x: 10, y: 300, width: 200, height: 44))
+        // accessibilityIdentifier so we can find the right node — UIScrollView
+        // can keep internal subviews (scroll indicators) that would otherwise
+        // win `children.first`.
+        label.accessibilityIdentifier = "scroll-target"
+        scroll.addSubview(label)
+
+        ViewIdentRegistry.shared.clear()
+        let windowNode = HierarchyScanner.buildNode(
+            from: window,
+            window: window,
+            windowCapture: nil,
+            captureScreenshots: false,
+            depth: 0
+        )
+        let labelNode = findNode(in: windowNode, accessibilityID: "scroll-target")
+        let corners = labelNode?.cornersInWindow ?? []
+
+        let expectedTL = label.convert(CGPoint(x: 0, y: 0), to: window)
+        let expectedBR = label.convert(CGPoint(x: 200, y: 44), to: window)
+        XCTAssertEqual(corners.count, 4)
+        XCTAssertEqual(corners.first?.x ?? .nan, expectedTL.x, accuracy: 0.001)
+        XCTAssertEqual(corners.first?.y ?? .nan, expectedTL.y, accuracy: 0.001)
+        XCTAssertEqual(corners.last?.x ?? .nan, expectedBR.x, accuracy: 0.001)
+        XCTAssertEqual(corners.last?.y ?? .nan, expectedBR.y, accuracy: 0.001)
+    }
+
+    /// Same scenario but builds from the scroll view as the root, so the
+    /// `layerChainToWindow` seed path runs (the parentToWindow == nil branch).
+    func test_buildNode_seedWalkHandlesScrolledAncestor() {
+        let window = makeWindow(size: CGSize(width: 390, height: 844))
+        let scroll = UIScrollView(frame: CGRect(x: 0, y: 100, width: 390, height: 700))
+        scroll.contentSize = CGSize(width: 390, height: 2000)
+        window.addSubview(scroll)
+        scroll.contentOffset = CGPoint(x: 0, y: 250)
+
+        let label = UIView(frame: CGRect(x: 20, y: 400, width: 100, height: 30))
+        label.accessibilityIdentifier = "scroll-target"
+        scroll.addSubview(label)
+
+        ViewIdentRegistry.shared.clear()
+        let scrollNode = HierarchyScanner.buildNode(
+            from: scroll,
+            window: window,
+            windowCapture: nil,
+            captureScreenshots: false,
+            depth: 0
+        )
+        let labelNode = findNode(in: scrollNode, accessibilityID: "scroll-target")
+        let corners = labelNode?.cornersInWindow ?? []
+
+        let expected = label.convert(CGPoint(x: 0, y: 0), to: window)
+        XCTAssertEqual(corners.first?.x ?? .nan, expected.x, accuracy: 0.001)
+        XCTAssertEqual(corners.first?.y ?? .nan, expected.y, accuracy: 0.001)
+    }
+
+    private func findNode(in node: ViewNode, accessibilityID: String) -> ViewNode? {
+        if node.accessibilityIdentifier == accessibilityID { return node }
+        for c in node.children {
+            if let hit = findNode(in: c, accessibilityID: accessibilityID) { return hit }
+        }
+        return nil
+    }
+
+    /// A rotated view: 2D affine. UIKit rotates around the layer's
+    /// `position`/`anchorPoint`; our chain has to match.
+    func test_buildNode_cornersUnderRotationMatchUIKit() {
+        let window = makeWindow(size: CGSize(width: 400, height: 400))
+        let parent = UIView(frame: CGRect(x: 50, y: 50, width: 200, height: 200))
+        window.addSubview(parent)
+        parent.transform = CGAffineTransform(rotationAngle: .pi / 6)
+
+        let child = UIView(frame: CGRect(x: 10, y: 20, width: 80, height: 40))
+        parent.addSubview(child)
+
+        ViewIdentRegistry.shared.clear()
+        let windowNode = HierarchyScanner.buildNode(
+            from: window,
+            window: window,
+            windowCapture: nil,
+            captureScreenshots: false,
+            depth: 0
+        )
+        let parentNode = windowNode.children.first
+        let childNode = parentNode?.children.first
+        let corners = childNode?.cornersInWindow ?? []
+        let b = child.bounds
+        let expected: [CGPoint] = [
+            child.convert(CGPoint(x: b.minX, y: b.minY), to: window),
+            child.convert(CGPoint(x: b.maxX, y: b.minY), to: window),
+            child.convert(CGPoint(x: b.minX, y: b.maxY), to: window),
+            child.convert(CGPoint(x: b.maxX, y: b.maxY), to: window),
+        ]
+        XCTAssertEqual(corners.count, 4)
+        for (got, want) in zip(corners, expected) {
+            XCTAssertEqual(got.x, want.x, accuracy: 0.001)
+            XCTAssertEqual(got.y, want.y, accuracy: 0.001)
+        }
+    }
+
     // MARK: - Layer-only branch
 
     func test_buildLayerNode_truncatesAtMaxDepth() {

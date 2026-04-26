@@ -113,6 +113,35 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
+    // MARK: - HierarchyChangeMonitor fingerprint
+    //
+    // The monitor recomputes its FNV-1a fingerprint over every attached
+    // window tree on each `.beforeWaiting` tick (≈60Hz). At ~1k+ nodes this
+    // is a continuous main-thread cost, so it gets its own baseline.
+
+    func test_perf_changeMonitor_hash_smallTree() {
+        let (_, root) = buildWideTree(branching: 4, depth: 4)
+        measure {
+            _ = HierarchyChangeMonitor._hashTreesForTesting([root])
+        }
+    }
+
+    func test_perf_changeMonitor_hash_mediumTree() {
+        let (_, root) = buildWideTree(branching: 6, depth: 4)
+        measure {
+            _ = HierarchyChangeMonitor._hashTreesForTesting([root])
+        }
+    }
+
+    /// ~5k nodes — the "stress" baseline. If this gets slow, the .beforeWaiting
+    /// observer will start eating frames in apps with dense feeds.
+    func test_perf_changeMonitor_hash_largeTree() {
+        let (_, root) = buildWideTree(branching: 8, depth: 4)
+        measure {
+            _ = HierarchyChangeMonitor._hashTreesForTesting([root])
+        }
+    }
+
     /// Cropping cost should scale with output bytes, not source image size —
     /// guards against accidentally re-encoding the whole window per crop.
     func test_perf_screenshotCrop() {

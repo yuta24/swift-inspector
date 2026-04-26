@@ -123,4 +123,18 @@ final class HierarchyChangeMonitor {
         hash &*= 0x100000001b3 // FNV-1a prime
     }
 }
+
+extension HierarchyChangeMonitor {
+    /// Test-only entry point: hash a caller-supplied root tree with the same
+    /// per-view logic the live monitor uses. Lets benchmarks measure the
+    /// fingerprint cost without standing up a real UIWindowScene.
+    static func _hashTreesForTesting(_ roots: [UIView]) -> UInt64 {
+        let m = HierarchyChangeMonitor()
+        var hash: UInt64 = 0xcbf29ce484222325
+        for root in roots {
+            m.hashView(root, into: &hash)
+        }
+        return hash
+    }
+}
 #endif
