@@ -233,6 +233,7 @@ private struct SceneKitView: NSViewRepresentable {
         // doesn't flash between captures.
         if coord.lastRootsHash != rootsHash {
             applySceneDelta(scnView: scnView, coord: coord)
+            installInitialCameraIfNeeded(scnView: scnView, coord: coord)
             coord.lastRootsHash = rootsHash
             coord.lastLayerSpacing = layerSpacing
             coord.lastShowLabels = showLabels
@@ -409,6 +410,12 @@ private struct SceneKitView: NSViewRepresentable {
             coord.measurementNode = nil
             coord.rootHeight = 0
             coord.screenArea = .zero
+            // Reconnecting to a different device hands us a fresh screenArea,
+            // so the next non-empty tick must re-fit the camera. Without this
+            // the cached orthographicScale/target stays sized for the old
+            // device and the new hierarchy lands off-screen or floats in a
+            // huge margin.
+            coord.didInstallInitialCamera = false
             return
         }
 
@@ -446,6 +453,75 @@ private struct SceneKitView: NSViewRepresentable {
 
         coord.pathMap = newPathMap
         coord.nodeMap = newNodeMap
+    }
+
+    /// Aim the camera straight at the layer stack on first paint, with a
+    /// few-degree offset so the depth gap reads immediately. SceneKit's
+    /// auto-framing (when `allowsCameraControl` is on without a custom
+    /// `pointOfView`) lands on a steeper angle that makes overlapping
+    /// rectangles look fanned-out and skewed — this resets it to "almost
+    /// head-on" so designers can judge overlap by default and orbit only
+    /// when they want the depth view.
+    private func installInitialCameraIfNeeded(scnView: SCNView, coord: Coordinator) {
+        guard !coord.didInstallInitialCamera, !coord.pathMap.isEmpty else { return }
+        let area = coord.screenArea
+        guard area.width > 0, area.height > 0, let scene = scnView.scene else { return }
+
+        let zs = coord.pathMap.values.map { CGFloat($0.snapshotNode.position.z) }
+        let zMin = zs.min() ?? 0
+        let zMax = zs.max() ?? 0
+        let target = SCNVector3(
+            area.midX,
+            area.height - area.midY,
+            (zMin + zMax) / 2
+        )
+
+        let camera = SCNCamera()
+        camera.zNear = 1
+        camera.zFar = 100_000
+        // Orthographic so layers at different Z keep the same projected size.
+        // Perspective would foreshorten back-of-stack views, and snapping the
+        // camera straight down +Z still left visible XY drift between layers
+        // — the opposite of how Xcode View Debugger reads, where "head-on"
+        // means every layer collapses onto the same silhouette.
+        camera.usesOrthographicProjection = true
+        let frame = max(area.width, area.height)
+        // orthographicScale is the visible half-height. 1.3× padding leaves
+        // breathing room for the slight tilt and any rotated planes that
+        // poke past the AABB.
+        camera.orthographicScale = frame / 2 * 1.3
+        // Camera distance no longer affects projected size under orthographic
+        // projection — it only fixes a position from which to apply the tilt.
+        // Keep it well inside zFar.
+        let distance = frame
+
+        // ~12° around Y, ~8° down around X. Small enough that overlap
+        // judgement still works on first paint, large enough that the depth
+        // gap between layers is unmistakable.
+        let yaw: CGFloat = 0.21
+        let pitch: CGFloat = 0.14
+        let cameraNode = SCNNode()
+        cameraNode.camera = camera
+        cameraNode.position = SCNVector3(
+            target.x + distance * sin(yaw) * cos(pitch),
+            target.y + distance * sin(pitch),
+            target.z + distance * cos(yaw) * cos(pitch)
+        )
+        cameraNode.look(at: target)
+
+        scene.rootNode.addChildNode(cameraNode)
+        scnView.pointOfView = cameraNode
+        // `allowsCameraControl = true` builds an internal SCNCameraController
+        // that caches its own pointOfView. Setting only `scnView.pointOfView`
+        // gets visually overridden the moment SceneKit hands the camera back
+        // to the controller (first render or first user gesture), so the two
+        // must be kept in sync explicitly.
+        let controller = scnView.defaultCameraController
+        controller.pointOfView = cameraNode
+        controller.automaticTarget = false
+        controller.target = target
+
+        coord.didInstallInitialCamera = true
     }
 
     // MARK: - Tree walk
@@ -925,6 +1001,10 @@ private struct SceneKitView: NSViewRepresentable {
         /// hierarchy.
         var rootHeight: CGFloat = 0
         var screenArea: CGRect = .zero
+        /// Set once the initial pointOfView has been placed. Subsequent live
+        /// ticks must not re-aim the camera or the user's manual orbits would
+        /// keep snapping back on every refresh.
+        var didInstallInitialCamera: Bool = false
 
         init(
             selectedNodeID: Binding<UUID?>,
