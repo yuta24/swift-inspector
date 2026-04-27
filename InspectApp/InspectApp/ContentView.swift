@@ -613,7 +613,6 @@ private struct InspectorView: View {
                         onNavigate: { id in selectedNodeID = id }
                     )
                     TypePropertiesSection(properties: node.properties)
-                    ChildrenSection(count: node.children.count)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1733,25 +1732,6 @@ private struct ConstraintRow: View {
             return "+ \(formatNumber(v))"
         }
         return "− \(formatNumber(-v))"
-    }
-}
-
-// MARK: - Children Section
-
-private struct ChildrenSection: View {
-    let count: Int
-
-    var body: some View {
-        GroupBox {
-            HStack(spacing: 8) {
-                PropertyLabel("count")
-                PropertyValue("\(count)")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(4)
-        } label: {
-            SectionHeader("Children", icon: "rectangle.3.group")
-        }
     }
 }
 
