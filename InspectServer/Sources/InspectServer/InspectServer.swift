@@ -27,12 +27,14 @@ import Foundation
 ///
 /// ## Required Info.plist keys
 ///
-/// iOS only advertises Bonjour services that the app declares up front.
-/// Without these, ``start(serviceName:)`` succeeds but the device is never
-/// visible to the macOS client:
-/// - `NSBonjourServices`: `["_swift-inspector._tcp"]`
 /// - `NSLocalNetworkUsageDescription`: a short reason string shown in the
-///   Local Network permission prompt.
+///   Local Network permission prompt the first time the listener starts.
+///   Without this key, ``start(serviceName:)`` succeeds but the OS blocks
+///   the listener from accepting connections.
+///
+/// `NSBonjourServices` is **not** required on the publishing side — that
+/// declaration only gates `NWBrowser` (the macOS client side), and macOS
+/// itself does not enforce it.
 public enum InspectServer {
     private static var listener: InspectListener?
 

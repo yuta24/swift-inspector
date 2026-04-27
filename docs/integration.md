@@ -30,30 +30,29 @@ unless either `DEBUG` or `SWIFT_INSPECTOR_ENABLED` is defined — without
 the guard, Release builds would fail with "Cannot find 'InspectServer'
 in scope".
 
-## 3. Declare Bonjour usage in `Info.plist`
+## 3. Declare local network usage in `Info.plist`
 
-iOS requires apps that publish or browse Bonjour services to declare
-them in `Info.plist`. Without these keys, `InspectServer.start()` will
-succeed but the device will never be advertised on the network — a silent
-failure that's easy to miss.
+iOS gates any local network communication behind a user prompt the first
+time it happens. The listener inside `InspectServer` triggers this prompt,
+so the host app must declare a usage string:
 
 ```xml
-<key>NSBonjourServices</key>
-<array>
-    <string>_swift-inspector._tcp</string>
-</array>
 <key>NSLocalNetworkUsageDescription</key>
 <string>Allows runtime UI inspection from a paired Mac on the same Wi-Fi network. Only used in internal builds.</string>
 ```
 
-The string under `NSLocalNetworkUsageDescription` is shown to the user
-in the Local Network permission prompt the first time the app starts
-the listener — write something your designers / QA team will recognize.
+The string is shown verbatim in the Local Network permission prompt —
+write something your designers / QA team will recognize.
+
+`NSBonjourServices` is **not** required on this side. That key only
+restricts apps that *browse* for Bonjour services (the macOS client),
+and macOS itself does not enforce it. Publishing a service with
+`NWListener` works as long as Local Network access is granted.
 
 If you only ship the inspector to internal builds (recommended — see
-[privacy.md](privacy.md)), you can scope these keys to those
-configurations only by maintaining separate `Info.plist` files or by
-using build settings to inject them conditionally.
+[privacy.md](privacy.md)), you can scope this key to those configurations
+only by maintaining separate `Info.plist` files or by using build
+settings to inject it conditionally.
 
 ## 4. Pick a build configuration
 

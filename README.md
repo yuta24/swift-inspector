@@ -34,11 +34,10 @@ struct MyApp: App {
 }
 ```
 
-You also need to declare Bonjour usage in `Info.plist`, otherwise the
-listener silently fails to advertise on the network. See
+You also need an `NSLocalNetworkUsageDescription` string in `Info.plist`
+so iOS will allow the listener to accept connections. See
 [docs/integration.md](docs/integration.md) for the full setup including
-the `Info.plist` keys and the build flag that gates inspection out of
-App Store releases.
+the build flag that gates inspection out of App Store releases.
 
 ## Privacy
 
