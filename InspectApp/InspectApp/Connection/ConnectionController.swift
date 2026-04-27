@@ -6,7 +6,7 @@ private let logger = Logger(subsystem: "swift-inspector", category: "connection"
 
 /// Owns the Bonjour browser, the live `InspectClient`, and the handshake /
 /// pairing / connecting-timeout state machine. Consumes the wire-protocol
-/// concerns that used to live directly on `InspectAppModel`, and exposes a
+/// concerns that used to live directly on `AppInspectorModel`, and exposes a
 /// callback-based API so the model can stay focused on UI-facing state.
 ///
 /// The browser is started once (`startBrowsing`) and then kept alive for the
@@ -189,7 +189,7 @@ final class ConnectionController {
     /// immediately" path based on the server's advertised protocol version.
     /// Pre-v4 servers don't understand `requestPair`, so sending it would
     /// just earn an `error("decode failed")` — fall back to the old behavior
-    /// instead so older devices still work after an InspectApp upgrade.
+    /// instead so older devices still work after an AppInspector upgrade.
     private func beginPairingIfNeeded(for handshake: InspectMessage.Handshake) {
         if handshake.protocolVersion >= InspectProtocol.pairingMinVersion {
             onAwaitingPairChanged(true)

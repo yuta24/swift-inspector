@@ -121,7 +121,7 @@ struct HierarchyNodeRow: View {
 /// view so both the sidebar row and the inspector header can drop it in
 /// without each duplicating the model lookup.
 struct NodeFocusMenu: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
     let nodeID: UUID
 
     var body: some View {

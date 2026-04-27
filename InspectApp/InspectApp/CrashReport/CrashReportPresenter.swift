@@ -108,7 +108,7 @@ final class CrashReportPresenter: ObservableObject {
 
         ## \(environment)
 
-        - swift-inspector: \(report.appVersion ?? "?")
+        - AppInspector: \(report.appVersion ?? "?")
         - macOS: \(report.osVersion ?? "?")
         - \(exceptionLabel): \(report.exceptionType ?? "?")\(signalSuffix)
         - \(occurredLabel): \(formattedDate(report.date))

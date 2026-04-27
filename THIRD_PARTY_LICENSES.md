@@ -16,7 +16,7 @@ swift-inspector inherit those terms.
 
 ## Sparkle
 
-- Used by: `InspectApp` (macOS client, embedded as `Sparkle.framework`)
+- Used by: `AppInspector` (macOS client, embedded as `Sparkle.framework`)
 - Repository: https://github.com/sparkle-project/Sparkle
 - License: MIT — https://github.com/sparkle-project/Sparkle/blob/2.x/LICENSE
 - Purpose: In-app self-update for the macOS client.

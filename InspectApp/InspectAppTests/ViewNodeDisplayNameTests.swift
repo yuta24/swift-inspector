@@ -1,6 +1,6 @@
 import XCTest
 import InspectCore
-@testable import InspectApp
+@testable import AppInspector
 
 final class ViewNodeDisplayNameTests: XCTestCase {
     func test_displayName_prefers_text_property() {

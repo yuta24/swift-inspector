@@ -10,7 +10,7 @@ designer review or QA on an internal TestFlight/Ad-hoc build.
 - **InspectServer** — Swift package linked into the iOS app. Publishes a
   Bonjour service, captures the window hierarchy on request, and streams
   live updates.
-- **InspectApp** — macOS client that discovers servers on the local
+- **AppInspector** — macOS client that discovers servers on the local
   network and inspects them.
 - **InspectCore** — shared wire format, models, and message protocol.
 
@@ -49,21 +49,21 @@ App Store. See [docs/privacy.md](docs/privacy.md) for the full posture.
 ## Using the client
 
 1. Launch the iOS app on a device on the same local network as your Mac.
-2. Open the macOS `InspectApp`. The device appears in the sidebar picker
+2. Open the macOS `AppInspector`. The device appears in the sidebar picker
    once Bonjour discovery resolves it.
 3. Select the device and press **Connect** to capture the current
    hierarchy, then use **Live** for auto-refreshing updates.
 
 ## Installing the macOS client
 
-Download the latest `InspectApp-<version>.zip` from
+Download the latest `AppInspector-<version>.zip` from
 [Releases](https://github.com/yuta24/swift-inspector/releases), unzip,
-and drag `InspectApp.app` into `~/Applications/` (or another location
+and drag `AppInspector.app` into `~/Applications/` (or another location
 you can write to — Sparkle needs write access to replace the bundle
 during updates).
 
 Built-in update checking: the app checks once at launch and again
-every 24 hours, and you can trigger a manual check via **swift-inspector
+every 24 hours, and you can trigger a manual check via **AppInspector
 → アップデートを確認…** in the menu bar.
 
 ## License

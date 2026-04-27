@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build InspectApp.app from the SPM executable target.
+# Build AppInspector.app from the SPM executable target.
 #
 # Usage:
 #   scripts/build_app.sh [VERSION] [BUILD_NUMBER]
@@ -14,12 +14,12 @@
 #                        the production GitHub Pages URL.
 #
 # Output:
-#   build/InspectApp.app  — bundle ready for codesign + notarization.
+#   build/AppInspector.app  — bundle ready for codesign + notarization.
 #
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="InspectApp"
+APP_NAME="AppInspector"
 VERSION="${1:-0.1.0}"
 BUILD_NUMBER="${2:-1}"
 
@@ -89,9 +89,9 @@ cat > "$CONTENTS/Info.plist" <<EOF
     <key>CFBundleIdentifier</key>
     <string>com.yuta24.swift-inspector</string>
     <key>CFBundleName</key>
-    <string>swift-inspector</string>
+    <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>swift-inspector</string>
+    <string>${APP_NAME}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

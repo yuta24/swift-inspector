@@ -3,7 +3,7 @@ import AppKit
 import InspectCore
 
 struct ContentView: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
     @EnvironmentObject var crashPresenter: CrashReportPresenter
     @State private var showInspector = true
 
@@ -126,7 +126,7 @@ private struct ActivityIndicator: View {
 /// Live mode toolbar button with a dropdown for picking the refresh interval.
 /// Click toggles Live on/off (Cmd+L); the chevron opens the interval menu.
 private struct LiveToolbarControl: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     private static let intervalPresets: [TimeInterval] = [0.5, 1.0, 2.0, 3.0]
 
@@ -225,7 +225,7 @@ private struct DetailContentView: View {
 // MARK: - Sidebar
 
 private struct SidebarView: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -299,7 +299,7 @@ private struct FocusBar: View {
 /// so the label/tooltip can reflect both "enter focus on X" and "exit focus"
 /// states without cluttering the main toolbar builder.
 private struct FocusToolbarButton: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
         if model.focusedNodeID != nil {
@@ -328,7 +328,7 @@ private struct FocusToolbarButton: View {
 // MARK: - Device Picker
 
 private struct DevicePickerBar: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
         VStack(spacing: 6) {
@@ -429,7 +429,7 @@ private struct DevicePickerBar: View {
 /// Renders nothing when there is nothing to act on (no selection, not
 /// connected, no error) — keeps the Picker row uncluttered in the idle state.
 private struct ConnectionActionButton: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
         if let action = resolvedAction {
@@ -698,7 +698,7 @@ private struct ScreenshotSection: View {
 private struct FigmaCompareSection: View {
     let node: ViewNode
     @EnvironmentObject var figmaModel: FigmaComparisonModel
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
         GroupBox {

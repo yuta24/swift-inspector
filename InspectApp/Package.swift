@@ -22,7 +22,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "InspectApp",
+            name: "AppInspector",
             dependencies: [
                 .product(name: "InspectCore", package: "swift-inspector"),
                 .product(name: "Sparkle", package: "Sparkle"),
@@ -37,8 +37,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "InspectAppTests",
-            dependencies: ["InspectApp"],
+            name: "AppInspectorTests",
+            dependencies: ["AppInspector"],
             path: "InspectAppTests"
         ),
     ]

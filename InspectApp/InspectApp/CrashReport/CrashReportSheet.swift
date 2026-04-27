@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Modal shown on launch when one or more crash reports for InspectApp
+/// Modal shown on launch when one or more crash reports for AppInspector
 /// have been written since the last time the user dismissed the sheet.
 /// Designer-facing wording — avoids "stack trace" / "exception" jargon
 /// in the primary copy and keeps technical detail behind a disclosure.

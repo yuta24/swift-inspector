@@ -103,7 +103,7 @@ jobs:
         env:
           SIGNING_IDENTITY: ${{ secrets.DEV_ID_SIGNING_IDENTITY }}
         run: |
-          APP=build/InspectApp.app
+          APP=build/AppInspector.app
           FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
           ENTITLEMENTS=build/entitlements.plist
 
@@ -146,8 +146,8 @@ jobs:
         run: |
           cd build
           ditto -c -k --sequesterRsrc --keepParent \
-            InspectApp.app \
-            "InspectApp-${{ steps.version.outputs.version }}.zip"
+            AppInspector.app \
+            "AppInspector-${{ steps.version.outputs.version }}.zip"
 
       - name: Notarize
         env:
@@ -156,7 +156,7 @@ jobs:
           TEAM_ID: ${{ secrets.TEAM_ID }}
         run: |
           xcrun notarytool submit \
-            "build/InspectApp-${{ steps.version.outputs.version }}.zip" \
+            "build/AppInspector-${{ steps.version.outputs.version }}.zip" \
             --apple-id "$APPLE_ID" \
             --password "$NOTARYTOOL_PASSWORD" \
             --team-id "$TEAM_ID" \
@@ -164,13 +164,13 @@ jobs:
 
       - name: Staple ticket
         run: |
-          xcrun stapler staple build/InspectApp.app
+          xcrun stapler staple build/AppInspector.app
           # Re-zip so the released archive carries the stapled ticket.
-          rm "build/InspectApp-${{ steps.version.outputs.version }}.zip"
+          rm "build/AppInspector-${{ steps.version.outputs.version }}.zip"
           cd build
           ditto -c -k --sequesterRsrc --keepParent \
-            InspectApp.app \
-            "InspectApp-${{ steps.version.outputs.version }}.zip"
+            AppInspector.app \
+            "AppInspector-${{ steps.version.outputs.version }}.zip"
 
       - name: Sign update with Sparkle EdDSA
         id: sparkle_sign
@@ -203,7 +203,7 @@ jobs:
           # into a single XML attribute group, so a stray \n would corrupt
           # the appcast.
           SIGNATURE_OUTPUT=$("$SIGN_UPDATE" \
-            "build/InspectApp-${{ steps.version.outputs.version }}.zip" \
+            "build/AppInspector-${{ steps.version.outputs.version }}.zip" \
             -f "$KEY_FILE" | tr -d '\n')
 
           {
@@ -215,7 +215,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/InspectApp-${{ steps.version.outputs.version }}.zip
+          files: build/AppInspector-${{ steps.version.outputs.version }}.zip
           generate_release_notes: true
 
       - name: Publish appcast.xml to gh-pages
@@ -224,7 +224,7 @@ jobs:
           BUILD_NUM: ${{ steps.version.outputs.build_num }}
           SIGNATURE_ATTRS: ${{ steps.sparkle_sign.outputs.signature_attrs }}
         run: |
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/InspectApp-${VERSION}.zip"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/AppInspector-${VERSION}.zip"
           PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
 
           APPCAST=$(mktemp)

@@ -1,6 +1,6 @@
 import XCTest
 import InspectCore
-@testable import InspectApp
+@testable import AppInspector
 
 final class FigmaLayerMatcherTests: XCTestCase {
     private let frame = FigmaNode(

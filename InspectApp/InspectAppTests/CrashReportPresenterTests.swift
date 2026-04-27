@@ -1,5 +1,5 @@
 import XCTest
-@testable import InspectApp
+@testable import AppInspector
 
 @MainActor
 final class CrashReportPresenterTests: XCTestCase {
@@ -26,9 +26,9 @@ final class CrashReportPresenterTests: XCTestCase {
     }
 
     func test_first_run_seeds_cursor_and_skips_preexisting_reports() throws {
-        // Pre-existing crash from before InspectApp ever scanned.
+        // Pre-existing crash from before AppInspector ever scanned.
         try writeIPS(
-            named: "InspectApp-2024-01-01-090000.ips",
+            named: "AppInspector-2024-01-01-090000.ips",
             timestamp: "2024-01-01 09:00:00.00 +0900"
         )
 
@@ -46,7 +46,7 @@ final class CrashReportPresenterTests: XCTestCase {
 
         // A crash that lands after the seed.
         let newReport = try writeIPS(
-            named: "InspectApp-2099-01-01-090000.ips",
+            named: "AppInspector-2099-01-01-090000.ips",
             timestamp: "2099-01-01 09:00:00.00 +0900"
         )
         // setAttributes nudges mtime forward so the cursor filter sees it.
@@ -64,7 +64,7 @@ final class CrashReportPresenterTests: XCTestCase {
 
     func test_dismiss_advances_cursor_and_clears_pending() throws {
         let report = try writeIPS(
-            named: "InspectApp-2099-01-01-090000.ips",
+            named: "AppInspector-2099-01-01-090000.ips",
             timestamp: "2099-01-01 09:00:00.00 +0900"
         )
         try FileManager.default.setAttributes(
@@ -95,7 +95,7 @@ final class CrashReportPresenterTests: XCTestCase {
         XCTAssertTrue(presenter.isSuppressed)
 
         try writeIPS(
-            named: "InspectApp-2099-01-01-090000.ips",
+            named: "AppInspector-2099-01-01-090000.ips",
             timestamp: "2099-01-01 09:00:00.00 +0900"
         )
 
@@ -112,7 +112,7 @@ final class CrashReportPresenterTests: XCTestCase {
         defaults.set(Date.distantPast, forKey: "CrashReportPresenter.lastScanDate")
         defaults.set(true, forKey: "CrashReportPresenter.suppressed")
         let report = try writeIPS(
-            named: "InspectApp-2099-01-01-090000.ips",
+            named: "AppInspector-2099-01-01-090000.ips",
             timestamp: "2099-01-01 09:00:00.00 +0900"
         )
         try FileManager.default.setAttributes(
@@ -144,8 +144,8 @@ final class CrashReportPresenterTests: XCTestCase {
 
     func test_issueURL_includes_required_query_items() throws {
         let report = CrashReport(
-            url: URL(fileURLWithPath: "/tmp/InspectApp.ips"),
-            processName: "InspectApp",
+            url: URL(fileURLWithPath: "/tmp/AppInspector.ips"),
+            processName: "AppInspector",
             appVersion: "0.1.0",
             osVersion: "macOS 14.5",
             bundleID: "com.yuta24.swift-inspector",
@@ -180,7 +180,7 @@ final class CrashReportPresenterTests: XCTestCase {
     private func makePresenter() -> CrashReportPresenter {
         CrashReportPresenter(
             defaults: defaults,
-            processName: "InspectApp",
+            processName: "AppInspector",
             bundleID: "com.yuta24.swift-inspector",
             repositoryURL: URL(string: "https://github.com/yuta24/swift-inspector")!,
             directoryOverride: tempDir
@@ -191,7 +191,7 @@ final class CrashReportPresenterTests: XCTestCase {
     private func writeIPS(named name: String, timestamp: String) throws -> URL {
         let url = tempDir.appendingPathComponent(name)
         let header: [String: Any] = [
-            "app_name": "InspectApp",
+            "app_name": "AppInspector",
             "timestamp": timestamp,
             "app_version": "0.1.0",
             "bundleID": "com.yuta24.swift-inspector",

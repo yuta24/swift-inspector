@@ -4,7 +4,7 @@ import SwiftUI
 /// Centralised access to the small set of `UserDefaults` knobs the user can
 /// tweak in Settings. Wraps `@AppStorage` keys so SwiftUI views and the model
 /// reach for the same string in one place — keeps drift between the writer
-/// (PreferencesView) and reader (InspectAppModel) impossible.
+/// (PreferencesView) and reader (AppInspectorModel) impossible.
 enum UserPreferences {
     enum Keys {
         static let screenshotJPEGQuality = "screenshotJPEGQuality"

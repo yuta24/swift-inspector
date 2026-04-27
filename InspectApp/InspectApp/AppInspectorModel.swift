@@ -15,7 +15,7 @@ enum LiveTransport: Equatable {
     case poll
 }
 
-/// View-facing facade for the InspectApp UI.
+/// View-facing facade for the AppInspector UI.
 ///
 /// The model intentionally keeps a wide surface of `@Published` properties so
 /// SwiftUI views can bind directly. The actual machinery is split across two
@@ -32,7 +32,7 @@ enum LiveTransport: Equatable {
 /// orchestration steps (inflight bookkeeping, post-pair hierarchy fetch,
 /// highlight push) that need to coordinate between the two helpers.
 @MainActor
-final class InspectAppModel: ObservableObject {
+final class AppInspectorModel: ObservableObject {
     @Published var discovered: [InspectEndpoint] = []
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?

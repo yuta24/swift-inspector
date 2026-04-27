@@ -1,5 +1,5 @@
 import XCTest
-@testable import InspectApp
+@testable import AppInspector
 
 final class CrashReportScannerTests: XCTestCase {
     private var tempDir: URL!
@@ -19,26 +19,26 @@ final class CrashReportScannerTests: XCTestCase {
 
     func test_returns_matching_ips_files_sorted_newest_first() throws {
         try writeIPS(
-            named: "InspectApp-2026-04-25-100000.ips",
+            named: "AppInspector-2026-04-25-100000.ips",
             timestamp: "2026-04-25 10:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
         try writeIPS(
-            named: "InspectApp-2026-04-25-130000.ips",
+            named: "AppInspector-2026-04-25-130000.ips",
             timestamp: "2026-04-25 13:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
 
         let reports = CrashReportScanner.scan(
             bundleID: "com.yuta24.swift-inspector",
-            processName: "InspectApp",
+            processName: "AppInspector",
             since: .distantPast,
             directory: tempDir
         )
 
         XCTAssertEqual(reports.count, 2)
-        XCTAssertEqual(reports[0].fileName, "InspectApp-2026-04-25-130000.ips")
-        XCTAssertEqual(reports[1].fileName, "InspectApp-2026-04-25-100000.ips")
+        XCTAssertEqual(reports[0].fileName, "AppInspector-2026-04-25-130000.ips")
+        XCTAssertEqual(reports[1].fileName, "AppInspector-2026-04-25-100000.ips")
         XCTAssertEqual(reports[0].exceptionType, "EXC_BAD_ACCESS")
         XCTAssertEqual(reports[0].signal, "SIGSEGV")
         XCTAssertEqual(reports[0].appVersion, "0.1.0")
@@ -46,7 +46,7 @@ final class CrashReportScannerTests: XCTestCase {
 
     func test_skips_files_older_than_since_cursor() throws {
         let oldFile = try writeIPS(
-            named: "InspectApp-2026-04-20-090000.ips",
+            named: "AppInspector-2026-04-20-090000.ips",
             timestamp: "2026-04-20 09:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
@@ -59,20 +59,20 @@ final class CrashReportScannerTests: XCTestCase {
         )
 
         try writeIPS(
-            named: "InspectApp-2026-04-25-130000.ips",
+            named: "AppInspector-2026-04-25-130000.ips",
             timestamp: "2026-04-25 13:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
 
         let reports = CrashReportScanner.scan(
             bundleID: "com.yuta24.swift-inspector",
-            processName: "InspectApp",
+            processName: "AppInspector",
             since: cutoff,
             directory: tempDir
         )
 
         XCTAssertEqual(reports.count, 1)
-        XCTAssertEqual(reports[0].fileName, "InspectApp-2026-04-25-130000.ips")
+        XCTAssertEqual(reports[0].fileName, "AppInspector-2026-04-25-130000.ips")
     }
 
     func test_skips_other_processes_by_name_prefix() throws {
@@ -82,41 +82,41 @@ final class CrashReportScannerTests: XCTestCase {
             bundleID: "com.apple.Safari"
         )
         try writeIPS(
-            named: "InspectApp-2026-04-25-140000.ips",
+            named: "AppInspector-2026-04-25-140000.ips",
             timestamp: "2026-04-25 14:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
 
         let reports = CrashReportScanner.scan(
             bundleID: "com.yuta24.swift-inspector",
-            processName: "InspectApp",
+            processName: "AppInspector",
             since: .distantPast,
             directory: tempDir
         )
 
         XCTAssertEqual(reports.count, 1)
-        XCTAssertEqual(reports[0].fileName, "InspectApp-2026-04-25-140000.ips")
+        XCTAssertEqual(reports[0].fileName, "AppInspector-2026-04-25-140000.ips")
     }
 
     func test_filters_by_bundleID_when_prefix_collides() throws {
-        // A different process whose name happens to share the InspectApp
+        // A different process whose name happens to share the AppInspector
         // prefix — the bundleID mismatch should keep it out.
         try writeIPS(
-            named: "InspectAppHelper-2026-04-25-130000.ips",
+            named: "AppInspectorHelper-2026-04-25-130000.ips",
             timestamp: "2026-04-25 13:00:00.00 +0900",
             bundleID: "com.example.OtherTool"
         )
         // Also: the prefix matches, so this would slip through if we
         // *only* compared bundleID.
         try writeIPS(
-            named: "InspectApp-2026-04-25-140000.ips",
+            named: "AppInspector-2026-04-25-140000.ips",
             timestamp: "2026-04-25 14:00:00.00 +0900",
             bundleID: "com.yuta24.swift-inspector"
         )
 
         let reports = CrashReportScanner.scan(
             bundleID: "com.yuta24.swift-inspector",
-            processName: "InspectApp",
+            processName: "AppInspector",
             since: .distantPast,
             directory: tempDir
         )
@@ -129,7 +129,7 @@ final class CrashReportScannerTests: XCTestCase {
         let bogus = tempDir.appendingPathComponent("does-not-exist", isDirectory: true)
         let reports = CrashReportScanner.scan(
             bundleID: "com.yuta24.swift-inspector",
-            processName: "InspectApp",
+            processName: "AppInspector",
             since: .distantPast,
             directory: bogus
         )
@@ -147,7 +147,7 @@ final class CrashReportScannerTests: XCTestCase {
             "app_version": "0.1.0",
             "bundleID": bundleID,
             "os_version": "macOS 14.5 (23F79)",
-            "name": "InspectApp",
+            "name": "AppInspector",
             "bug_type": "309",
         ]
         let body: [String: Any] = [

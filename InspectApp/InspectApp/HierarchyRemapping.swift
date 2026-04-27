@@ -1,7 +1,7 @@
 import Foundation
 import InspectCore
 
-/// Pure functions used by `InspectAppModel` to keep selection, focus, and
+/// Pure functions used by `AppInspectorModel` to keep selection, focus, and
 /// screenshots stable across hierarchy snapshots. Every capture by
 /// `HierarchyScanner` assigns fresh UUIDs, so we can't compare ids across
 /// snapshots — instead we project each tracked node to a *stable path*

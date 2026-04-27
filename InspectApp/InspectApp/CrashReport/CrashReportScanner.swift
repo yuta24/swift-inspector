@@ -5,7 +5,7 @@ private let logger = Logger(subsystem: "swift-inspector", category: "crash-repor
 
 /// Reads `~/Library/Logs/DiagnosticReports/` and returns recent crash
 /// reports for our process. The directory is readable for non-sandboxed
-/// apps without any special entitlement — InspectApp ships unsandboxed
+/// apps without any special entitlement — AppInspector ships unsandboxed
 /// so this works directly.
 enum CrashReportScanner {
     /// Returns reports for `processName` (and matching `bundleID` when
@@ -74,7 +74,7 @@ enum CrashReportScanner {
         }
 
         // Don't surface another process that happens to share our prefix
-        // (e.g. "InspectApp" vs "InspectAppHelper") when we can verify the
+        // (e.g. "AppInspector" vs "AppInspectorHelper") when we can verify the
         // bundle identifier.
         if let expected = expectedBundleID,
            let actual = header["bundleID"] as? String,

@@ -1,5 +1,5 @@
 import XCTest
-@testable import InspectApp
+@testable import AppInspector
 
 final class FigmaNodeTests: XCTestCase {
     func testDecodeFrameWithChildren() throws {

@@ -3,7 +3,7 @@ import SwiftUI
 /// Macアプリの「環境設定」ウィンドウ本体。今は画質スライダー1つだけだが、
 /// 後から増えても自然に並ぶよう `Form` + `Section` 構造にしておく。
 struct PreferencesView: View {
-    @EnvironmentObject var model: InspectAppModel
+    @EnvironmentObject var model: AppInspectorModel
     @AppStorage(UserPreferences.Keys.screenshotJPEGQuality)
     private var screenshotJPEGQuality: Double = 0.7
     @State private var figmaToken: String = FigmaTokenStore.load() ?? ""

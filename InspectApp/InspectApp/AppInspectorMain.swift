@@ -2,9 +2,9 @@ import SwiftUI
 import Sparkle
 
 @main
-struct InspectAppMain: App {
+struct AppInspectorMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = InspectAppModel()
+    @StateObject private var model = AppInspectorModel()
     @StateObject private var crashPresenter = CrashReportPresenter()
     @StateObject private var figmaModel = FigmaComparisonModel()
     /// Sparkle の自動アップデート一式。`.app` バンドルから起動された場合
@@ -18,7 +18,7 @@ struct InspectAppMain: App {
     private let updater: UpdaterStack? = makeUpdaterStack()
 
     var body: some Scene {
-        WindowGroup("swift-inspector") {
+        WindowGroup("AppInspector") {
             ContentView()
                 .environmentObject(model)
                 .environmentObject(crashPresenter)
@@ -51,7 +51,7 @@ struct InspectAppMain: App {
 
 /// Sparkle の `SPUStandardUpdaterController` と、それを購読する
 /// `CheckForUpdatesViewModel` のペアを束ねる入れ物。両方の生存期間を
-/// `InspectAppMain` (＝プロセス) に揃えるためのバンドル。
+/// `AppInspectorMain` (＝プロセス) に揃えるためのバンドル。
 private struct UpdaterStack {
     let controller: SPUStandardUpdaterController
     let viewModel: CheckForUpdatesViewModel
@@ -80,7 +80,7 @@ private func makeUpdaterStack() -> UpdaterStack? {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var model: InspectAppModel?
+    var model: AppInspectorModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)

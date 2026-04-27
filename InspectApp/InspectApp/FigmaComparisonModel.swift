@@ -4,7 +4,7 @@ import Combine
 import InspectCore
 
 /// View model for the Figma compare section in the inspector. Lives
-/// alongside `InspectAppModel` (not inside it) because Figma state is
+/// alongside `AppInspectorModel` (not inside it) because Figma state is
 /// orthogonal to the inspector connection — designers may want to keep
 /// their last-fetched Figma frame visible while reconnecting to a new
 /// device, and Figma fetch failures shouldn't show up next to TCP-level
