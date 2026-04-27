@@ -45,29 +45,12 @@ struct ContentView: View {
             )
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .status) {
                 ActivityIndicator(
                     isConnecting: model.isConnecting,
                     isAwaitingPair: model.isAwaitingPairApproval,
                     isInflight: model.isInflight
                 )
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.requestHierarchy()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .disabled(!model.isConnected)
-                .keyboardShortcut("r", modifiers: .command)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                FocusToolbarButton()
-                    .environmentObject(model)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                LiveToolbarControl()
-                    .environmentObject(model)
             }
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -230,6 +213,7 @@ private struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             DevicePickerBar()
+            SidebarActionsBar()
             Divider()
             if let focused = model.focusedNode {
                 FocusBar(node: focused) {
@@ -244,6 +228,51 @@ private struct SidebarView: View {
                 expandedPaths: $model.expandedPaths
             )
         }
+    }
+}
+
+// MARK: - Sidebar Actions Bar
+
+/// Hierarchy-fetch and focus controls grouped with the device picker.
+/// Lives in the sidebar (not the window toolbar) because Refresh and Live
+/// drive what flows into the tree, while the inspector only displays the
+/// already-fetched node — putting them above the inspector implied a
+/// scope they didn't have.
+private struct SidebarActionsBar: View {
+    @EnvironmentObject var model: AppInspectorModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                model.requestHierarchy()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .disabled(!model.isConnected)
+            .keyboardShortcut("r", modifiers: .command)
+            .help("Refresh hierarchy (⌘R)")
+
+            LiveToolbarControl()
+
+            Spacer(minLength: 4)
+
+            Button {
+                guard let id = model.selectedNodeID else { return }
+                model.focus(on: id)
+            } label: {
+                Image(systemName: "scope")
+            }
+            .buttonStyle(.borderless)
+            // Disabled while a focus is already active so the matching
+            // ⌘⇧F keyboard shortcut routes to FocusBar's exit button
+            // instead — toggle behavior preserved across two views.
+            .disabled(model.selectedNodeID == nil || model.focusedNodeID != nil)
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .help("Focus on selected (⌘⇧F)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
     }
 }
 
@@ -285,43 +314,15 @@ private struct FocusBar: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            // Re-binds ⌘⇧F to "exit" while focus is active so the
+            // shortcut continues to toggle, mirroring the enter-side
+            // binding in SidebarActionsBar.
+            .keyboardShortcut("f", modifiers: [.command, .shift])
             .help("Exit focus (⌘⇧F)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(Color.accentColor.opacity(0.12))
-    }
-}
-
-// MARK: - Focus Toolbar Button
-
-/// Toggles subtree focus on the current selection. Split into its own view
-/// so the label/tooltip can reflect both "enter focus on X" and "exit focus"
-/// states without cluttering the main toolbar builder.
-private struct FocusToolbarButton: View {
-    @EnvironmentObject var model: AppInspectorModel
-
-    var body: some View {
-        if model.focusedNodeID != nil {
-            Button {
-                model.clearFocus()
-            } label: {
-                Label("Exit Focus", systemImage: "scope")
-                    .symbolVariant(.slash)
-            }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-            .help("Exit focus — show the full hierarchy")
-        } else {
-            Button {
-                guard let id = model.selectedNodeID else { return }
-                model.focus(on: id)
-            } label: {
-                Label("Focus", systemImage: "scope")
-            }
-            .disabled(model.selectedNodeID == nil)
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-            .help("Focus the tree and scene on the selected view (⌘⇧F)")
-        }
     }
 }
 
