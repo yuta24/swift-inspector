@@ -1,3 +1,30 @@
+# Builds, codesigns, notarizes, and publishes the macOS client whenever a
+# `v*` tag is pushed. Also updates `appcast.xml` on the `gh-pages` branch
+# so installed clients pick up the release via Sparkle.
+#
+# Required repository secrets:
+#   SPARKLE_PRIVATE_KEY     — EdDSA private key (output of `generate_keys -x`).
+#   SPARKLE_PUBLIC_KEY      — matching public key, embedded into Info.plist.
+#   DEV_ID_CERT_P12         — Developer ID Application .p12, base64-encoded.
+#   DEV_ID_CERT_PASSWORD    — password for the .p12.
+#   DEV_ID_SIGNING_IDENTITY — e.g. "Developer ID Application: Name (TEAMID)".
+#   APPLE_ID                — Apple ID email used for notarization.
+#   NOTARYTOOL_PASSWORD     — app-specific password from appleid.apple.com,
+#                             NOT the Apple ID account password.
+#   TEAM_ID                 — 10-char Apple Developer Team ID.
+#
+# One-time bootstrap (only re-run when the EdDSA key is lost or rotated):
+#   1. `swift package resolve` inside `InspectApp/`, then locate Sparkle's
+#      `generate_keys` under `.build/artifacts` and run it. The public key
+#      goes to stdout; export the private key with `generate_keys -x` and
+#      register both as the secrets above.
+#   2. Create an orphan `gh-pages` branch and enable Pages
+#      (Settings → Pages → Deploy from branch → gh-pages / root). The
+#      appcast is published there at
+#      https://yuta24.github.io/swift-inspector/appcast.xml.
+#
+# Cutting a release: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
 name: Release
 
 on:

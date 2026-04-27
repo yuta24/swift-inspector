@@ -14,9 +14,9 @@ designer review or QA on an internal TestFlight/Ad-hoc build.
   network and inspects them.
 - **InspectCore** — shared wire format, models, and message protocol.
 
-## Integration
+## Quick start
 
-Add `InspectServer` as a Swift package dependency of your iOS app and
+Add `swift-inspector` as a Swift package dependency of your iOS app and
 start the server at launch:
 
 ```swift
@@ -34,98 +34,18 @@ struct MyApp: App {
 }
 ```
 
-The `#if` guard is required because `InspectServer` compiles to nothing
-unless either `DEBUG` or `SWIFT_INSPECTOR_ENABLED` is defined — without
-the guard, Release builds would fail with "Cannot find 'InspectServer'
-in scope".
+You also need to declare Bonjour usage in `Info.plist`, otherwise the
+listener silently fails to advertise on the network. See
+[docs/integration.md](docs/integration.md) for the full setup including
+the `Info.plist` keys and the build flag that gates inspection out of
+App Store releases.
 
-### Info.plist requirements
+## Privacy
 
-iOS requires apps that publish or browse Bonjour services to declare
-them in `Info.plist`. Without these keys, `InspectServer.start()` will
-succeed but the device will never be advertised on the network — a silent
-failure that's easy to miss. Add to your app's `Info.plist`:
-
-```xml
-<key>NSBonjourServices</key>
-<array>
-    <string>_swift-inspector._tcp</string>
-</array>
-<key>NSLocalNetworkUsageDescription</key>
-<string>Allows runtime UI inspection from a paired Mac on the same Wi-Fi network. Only used in internal builds.</string>
-```
-
-The string under `NSLocalNetworkUsageDescription` is shown to the user
-in the Local Network permission prompt the first time the app starts
-the listener — write something your designers / QA team will recognize.
-
-If you only ship the inspector to internal builds (recommended — see
-the privacy section below), you can scope these keys to those
-configurations only by maintaining separate `Info.plist` files or by
-using build settings to inject them conditionally.
-
-## Build configurations
-
-`InspectServer` is gated by a compile-time flag so that reflection,
-screenshot capture, and the Bonjour/TCP listener never ship in a public
-release:
-
-| Configuration                  | Active compile flags                | InspectServer |
-| ------------------------------ | ----------------------------------- | ------------- |
-| Local Debug                    | `DEBUG`                             | ✅ Included   |
-| Internal / TestFlight / Ad-hoc | add `SWIFT_INSPECTOR_ENABLED`       | ✅ Included   |
-| App Store Release              | *(neither)*                         | ❌ Excluded   |
-
-To enable it in a non-Debug configuration (e.g. an "Internal" scheme used
-for designer review), add `SWIFT_INSPECTOR_ENABLED` to that
-configuration's **Other Swift Flags** via `SWIFT_ACTIVE_COMPILATION_CONDITIONS`:
-
-```
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) SWIFT_INSPECTOR_ENABLED
-```
-
-**Do not** set `SWIFT_INSPECTOR_ENABLED` on your App Store configuration.
-The App Store build must leave it undefined so the inspection code is
-compiled out entirely. The `DEBUG || SWIFT_INSPECTOR_ENABLED` guard in
-source makes this the default when you do nothing special.
-
-## Privacy & security considerations
-
-The inspector exposes the running app's UI to anyone on the same local
-network. Treat every build that includes `InspectServer` as a build that
-**leaks UI state over the wire**, and choose your distribution channels
-accordingly.
-
-Concretely:
-
-- **`accessibilityIdentifier` / `accessibilityLabel` / view text** can
-  contain personal data (email addresses, account names, message bodies).
-  These fields are captured verbatim and sent to the connected client.
-- **Group / solo screenshots** show whatever is on screen at the moment
-  of capture, including any data your app is currently displaying.
-- **Bonjour discovery** advertises the device name on the local network.
-  An attacker on the same Wi-Fi can see that an inspectable build is
-  running, even before any client connects.
-- **Device-side approval is required** for every connection, but once
-  granted the session has full read access to the hierarchy until the
-  app is closed.
-
-Recommended posture:
-- Ship inspector-enabled builds only to internal channels (TestFlight
-  Internal, Ad-hoc, dogfood) — never to public TestFlight or the App
-  Store.
-- Run inspector sessions on trusted networks (office VLAN, personal
-  hotspot), not open Wi-Fi.
-- The compile-time gate is the primary defense. Verify in your CI
-  release pipeline that `SWIFT_INSPECTOR_ENABLED` is **not** set on the
-  App Store configuration before submission.
-
-## Third-party licenses
-
-swift-inspector links DeviceKit (in the iOS server) and Sparkle (in the
-macOS client). Both are MIT-licensed and compatible with this project's
-license. See [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) for
-attribution and upstream URLs.
+Inspector-enabled builds expose view text, screenshots, and Bonjour
+discovery over the local network. Ship them to internal channels only
+(TestFlight Internal, Ad-hoc, dogfood), never to public TestFlight or the
+App Store. See [docs/privacy.md](docs/privacy.md) for the full posture.
 
 ## Using the client
 
@@ -147,64 +67,10 @@ Built-in update checking: the app checks once at launch and again
 every 24 hours, and you can trigger a manual check via **swift-inspector
 → アップデートを確認…** in the menu bar.
 
-## Releasing a new version
+## License
 
-Releases are fully automated by `.github/workflows/release.yml`. The
-one-time setup below has to land before the first tag.
-
-### One-time setup
-
-**1. Generate the EdDSA key pair.** Sparkle ships `generate_keys` inside
-its SPM artifact. After running `swift package resolve` in `InspectApp/`
-once, locate it and run:
-
-```sh
-SIGN_TOOLS=$(find InspectApp/.build/artifacts -name generate_keys -perm +111 | head -n1)
-"$SIGN_TOOLS"
-```
-
-It prints the public key on stdout and stores the private key in the
-macOS Keychain. Export the private key with `"$SIGN_TOOLS" -x` and
-register both into GitHub Secrets (see the table below).
-
-**2. Create the `gh-pages` branch and enable GitHub Pages.**
-
-```sh
-git checkout --orphan gh-pages
-git rm -rf .
-git commit --allow-empty -m "init gh-pages"
-git push origin gh-pages
-git checkout main
-```
-
-Then in GitHub: **Settings → Pages → Build and deployment → Source:
-Deploy from a branch → `gh-pages` / `(root)`**. The workflow publishes
-`appcast.xml` to that branch and it gets served at
-`https://yuta24.github.io/swift-inspector/appcast.xml` — that URL is
-baked into the app via `SUFeedURL`.
-
-**3. Register repository secrets.**
-
-| Secret | Value |
-| --- | --- |
-| `SPARKLE_PRIVATE_KEY` | EdDSA private key (`generate_keys -x` output). |
-| `SPARKLE_PUBLIC_KEY`  | Matching public key, embedded into `Info.plist` at build time. |
-| `DEV_ID_CERT_P12`     | Developer ID Application `.p12`, base64-encoded. |
-| `DEV_ID_CERT_PASSWORD`| Password for the `.p12`. |
-| `DEV_ID_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)`. |
-| `APPLE_ID`, `NOTARYTOOL_PASSWORD`, `TEAM_ID` | Notarization credentials. |
-
-### Cutting a release
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The workflow builds the `.app`, codesigns and notarizes it, signs the
-archive with the EdDSA key, uploads it as a Release asset, and updates
-`appcast.xml` on `gh-pages`. Running clients pick up the new version on
-their next launch or manual check.
+MIT — see [`LICENSE`](LICENSE). Bundled third-party software (DeviceKit,
+Sparkle) is attributed in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
 
 ## Acknowledgments
 
