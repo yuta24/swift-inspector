@@ -702,12 +702,22 @@ private struct FigmaCompareSection: View {
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
-                urlField
-                if let error = figmaModel.errorMessage {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                urlRow
+                if case .fetching = figmaModel.status {
+                    fetchingRow
+                }
+                if case .loaded(cached: true) = figmaModel.status {
+                    cachedCaption
+                }
+                if case .error(let serviceError) = figmaModel.status {
+                    FigmaErrorBanner(
+                        error: serviceError,
+                        onRetry: { figmaModel.fetch() },
+                        onOpenPreferences: Self.openPreferences
+                    )
+                }
+                if shouldShowIdleGuide {
+                    idleGuide
                 }
                 if figmaModel.image != nil {
                     modePicker
@@ -742,33 +752,101 @@ private struct FigmaCompareSection: View {
         }
     }
 
-    private var urlField: some View {
+    private var urlRow: some View {
         HStack(spacing: 6) {
             TextField("Figma frame URL", text: $figmaModel.frameURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption)
                 .onSubmit { figmaModel.fetch() }
-            if figmaModel.isLoading {
-                ProgressView().controlSize(.small)
-            } else {
+            urlActions
+        }
+    }
+
+    @ViewBuilder
+    private var urlActions: some View {
+        if case .fetching = figmaModel.status {
+            ProgressView().controlSize(.small)
+            Button {
+                figmaModel.cancel()
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Cancel fetch")
+        } else {
+            Button {
+                figmaModel.fetch()
+            } label: {
+                Image(systemName: "arrow.down.circle")
+            }
+            .buttonStyle(.borderless)
+            .disabled(figmaModel.frameURL.isEmpty)
+            .help("Fetch the frame from Figma")
+            if figmaModel.image != nil {
                 Button {
-                    figmaModel.fetch()
+                    figmaModel.clear()
                 } label: {
-                    Image(systemName: "arrow.down.circle")
+                    Image(systemName: "xmark.circle")
                 }
                 .buttonStyle(.borderless)
-                .disabled(figmaModel.frameURL.isEmpty)
-                .help("Fetch the frame from Figma")
-                if figmaModel.image != nil {
-                    Button {
-                        figmaModel.clear()
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Clear the loaded Figma frame")
-                }
+                .help("Clear the loaded Figma frame")
             }
+        }
+    }
+
+    private var fetchingRow: some View {
+        Text("Fetching from Figma…")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var cachedCaption: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "internaldrive")
+                .foregroundStyle(.secondary)
+            Text("Loaded from cache")
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+    }
+
+    private var shouldShowIdleGuide: Bool {
+        if case .idle = figmaModel.status,
+           figmaModel.image == nil,
+           figmaModel.frameURL.isEmpty {
+            return true
+        }
+        return false
+    }
+
+    private var idleGuide: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Compare a Figma frame to the device")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("1. Copy a frame share link from Figma")
+            Text("2. Paste it above and click the download icon")
+            Text("3. We fetch the image and overlay it on the device")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    /// Opens the app's Settings window. The selector renamed in macOS 14
+    /// (`showSettingsWindow:`) from the macOS 13 spelling
+    /// (`showPreferencesWindow:`); both are stringified to avoid the
+    /// "unknown selector" compile-time check on the unavailable side.
+    private static func openPreferences() {
+        if #available(macOS 14, *) {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } else {
+            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
         }
     }
 
@@ -850,6 +928,144 @@ private struct FigmaCompareSection: View {
         // node.frame would land on a parent-relative value that's mostly
         // useless for "is this Figma frame the right canvas size".
         figmaModel.updateSizeWarning(deviceWindowWidth: Double(node.windowFrame.width))
+    }
+}
+
+/// Structured presentation of a `FigmaImageService.ServiceError`. Maps each
+/// error case to an icon, severity color, and an optional remediation
+/// button so the user is never stuck staring at red text without knowing
+/// what to do next.
+private struct FigmaErrorBanner: View {
+    let error: FigmaImageService.ServiceError
+    let onRetry: () -> Void
+    let onOpenPreferences: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: spec.icon)
+                .foregroundStyle(spec.color)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(spec.title)
+                    .font(.caption.weight(.semibold))
+                Text(spec.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let action = spec.action {
+                    Button(action.label) {
+                        switch action.kind {
+                        case .openPreferences: onOpenPreferences()
+                        case .retry: onRetry()
+                        }
+                    }
+                    .controlSize(.small)
+                    .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(spec.color.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(spec.color.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    private struct Spec {
+        let icon: String
+        let color: Color
+        let title: LocalizedStringKey
+        let description: String
+        let action: Action?
+    }
+
+    private struct Action {
+        enum Kind { case openPreferences, retry }
+        let label: LocalizedStringKey
+        let kind: Kind
+    }
+
+    private var spec: Spec {
+        switch error {
+        case .invalidURL:
+            return Spec(
+                icon: "link",
+                color: .orange,
+                title: "Invalid frame URL",
+                description: String(localized: "Paste a Figma frame share link that includes a node-id, e.g. figma.com/file/.../...?node-id=12-34"),
+                action: nil
+            )
+        case .missingToken:
+            return Spec(
+                icon: "key",
+                color: .orange,
+                title: "Personal Access Token required",
+                description: String(localized: "Figma needs a token to fetch frames. Save one in Preferences."),
+                action: Action(label: "Open Preferences", kind: .openPreferences)
+            )
+        case .unauthorized:
+            return Spec(
+                icon: "lock.slash",
+                color: .red,
+                title: "Figma rejected the token",
+                description: String(localized: "The saved token is no longer valid. Update it in Preferences."),
+                action: Action(label: "Open Preferences", kind: .openPreferences)
+            )
+        case .rateLimited(let retryAfter):
+            let description: String = {
+                if let retryAfter, retryAfter > 0 {
+                    return String(
+                        format: String(localized: "Hit the Figma rate limit. Try again in %.0f seconds."),
+                        retryAfter
+                    )
+                }
+                return String(localized: "Hit the Figma rate limit. Wait a moment and try again.")
+            }()
+            return Spec(
+                icon: "clock",
+                color: .orange,
+                title: "Rate limited",
+                description: description,
+                action: Action(label: "Retry", kind: .retry)
+            )
+        case .nodeNotFound:
+            return Spec(
+                icon: "questionmark.circle",
+                color: .red,
+                title: "Frame not found",
+                description: String(localized: "Couldn't find that frame. Make sure the URL points to a frame, not just the file root."),
+                action: Action(label: "Retry", kind: .retry)
+            )
+        case .network(let underlying):
+            return Spec(
+                icon: "wifi.slash",
+                color: .red,
+                title: "Network error",
+                description: underlying.localizedDescription,
+                action: Action(label: "Retry", kind: .retry)
+            )
+        case .unexpectedStatus(let code):
+            return Spec(
+                icon: "exclamationmark.triangle",
+                color: .red,
+                title: "Figma returned an error",
+                description: String(format: String(localized: "Figma responded with HTTP %d."), code),
+                action: Action(label: "Retry", kind: .retry)
+            )
+        case .decoding:
+            return Spec(
+                icon: "exclamationmark.bubble",
+                color: .red,
+                title: "Couldn't read response",
+                description: String(localized: "Figma returned data we couldn't decode."),
+                action: Action(label: "Retry", kind: .retry)
+            )
+        }
     }
 }
 

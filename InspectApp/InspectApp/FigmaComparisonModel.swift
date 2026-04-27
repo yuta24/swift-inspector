@@ -46,6 +46,16 @@ final class FigmaComparisonModel: ObservableObject {
         let figmaPoints: Double
     }
 
+    /// Lifecycle state of the compare section. Single source of truth for
+    /// the header badge, the controls in the URL row (fetch vs cancel),
+    /// the empty-state guide, and the structured error banner.
+    enum Status {
+        case idle
+        case fetching
+        case loaded(cached: Bool)
+        case error(FigmaImageService.ServiceError)
+    }
+
     // MARK: - Published state
 
     /// Raw URL the user typed into the compare bar. We intentionally keep
@@ -61,9 +71,7 @@ final class FigmaComparisonModel: ObservableObject {
     /// it produces the design's logical points width — used by the size-
     /// mismatch warning and the heatmap coordinate mapping.
     @Published private(set) var imageScale: Int = FigmaImageService.defaultImageScale
-    @Published private(set) var isLoading: Bool = false
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var lastFetchedFromCache: Bool = false
+    @Published private(set) var status: Status = .idle
     @Published private(set) var sizeWarning: SizeWarning?
     /// All ViewNode → Figma layer matches in the currently-loaded
     /// hierarchy. Recomputed when either the Figma frame or the inspector's
@@ -83,6 +91,10 @@ final class FigmaComparisonModel: ObservableObject {
     private var fetchTask: Task<Void, Never>?
     private var layerTree: FigmaNode?
     private var lastRoots: [ViewNode] = []
+    /// Remembers the cache-vs-fresh outcome of the last successful fetch so
+    /// `cancel()` can restore the prior `.loaded(cached:)` status without
+    /// silently downgrading the source label of an already-displayed image.
+    private var lastLoadedCached: Bool?
 
     init(service: FigmaImageService = FigmaImageService()) {
         self.service = service
@@ -97,27 +109,21 @@ final class FigmaComparisonModel: ObservableObject {
     /// so a Settings change applies immediately without explicit wiring.
     func fetch() {
         fetchTask?.cancel()
-        errorMessage = nil
         guard let ref = FigmaImageService.parse(frameURL) else {
-            errorMessage = FigmaImageService.ServiceError.invalidURL.localizedDescription
+            status = .error(.invalidURL)
             return
         }
         guard let token = FigmaTokenStore.load(), !token.isEmpty else {
-            errorMessage = FigmaImageService.ServiceError.missingToken.localizedDescription
+            status = .error(.missingToken)
             return
         }
         // Persist URL on a successful parse so the compare bar pre-fills
         // with the same value next launch.
         UserDefaults.standard.set(frameURL, forKey: UserPreferences.Keys.figmaLastFrameURL)
 
-        isLoading = true
+        status = .fetching
         let service = self.service
         fetchTask = Task { @MainActor [weak self] in
-            // Inheriting MainActor here keeps `defer` on the same isolation
-            // domain as the @Published writes, so `isLoading = false` lands
-            // synchronously when the task ends — including when the user
-            // cancels mid-flight by retyping the URL or hitting clear.
-            defer { self?.isLoading = false }
             do {
                 async let imageFetch = service.fetchImage(ref: ref, token: token)
                 async let nodesFetch = service.fetchNodes(ref: ref, token: token)
@@ -127,17 +133,38 @@ final class FigmaComparisonModel: ObservableObject {
                 self.image = nsImage
                 self.imagePixelSize = nsImage.flatMap { Self.pixelSize(of: $0) }
                 self.imageScale = result.scale
-                self.lastFetchedFromCache = result.fromCache
                 self.layerTree = layerTree
                 self.recomputeMatches()
                 if self.displayMode == .deviceOnly {
                     self.displayMode = .sideBySide
                 }
+                self.lastLoadedCached = result.fromCache
+                self.status = .loaded(cached: result.fromCache)
+            } catch is CancellationError {
+                // URLSession may surface cancellation as a regular error
+                // before our `Task.isCancelled` check fires; swallow it
+                // explicitly so a user-initiated cancel never paints an
+                // error banner.
+                return
             } catch {
                 guard !Task.isCancelled, let self else { return }
-                self.errorMessage = (error as? LocalizedError)?.errorDescription
-                    ?? error.localizedDescription
+                let serviceError = (error as? FigmaImageService.ServiceError) ?? .network(error)
+                self.status = .error(serviceError)
             }
+        }
+    }
+
+    /// Cancels an in-flight fetch. Leaves any previously-loaded image in
+    /// place so users can abort a slow refresh without losing their
+    /// existing comparison — and keeps the prior cached/fresh badge so the
+    /// designer can still tell where the on-screen image came from.
+    func cancel() {
+        fetchTask?.cancel()
+        fetchTask = nil
+        if image != nil, let cached = lastLoadedCached {
+            status = .loaded(cached: cached)
+        } else {
+            status = .idle
         }
     }
 
@@ -149,12 +176,12 @@ final class FigmaComparisonModel: ObservableObject {
         image = nil
         imagePixelSize = nil
         sizeWarning = nil
-        lastFetchedFromCache = false
-        errorMessage = nil
         layerTree = nil
         matches = [:]
         diffs = [:]
         differingNodeIDs = []
+        lastLoadedCached = nil
+        status = .idle
         service.clearCache()
     }
 
