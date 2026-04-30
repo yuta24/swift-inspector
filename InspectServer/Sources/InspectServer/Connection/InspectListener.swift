@@ -70,6 +70,15 @@ final class InspectListener {
         pendingPairConnections.removeAll()
     }
 
+    /// TCP port the underlying `NWListener` is bound to, surfaced for
+    /// the connection-info overlay so a user with a Bonjour-blocked
+    /// network can read it off the device and type `host:port` into
+    /// the macOS client. Nil before `start()` resolves a port and
+    /// after `stop()` clears the listener.
+    var boundPort: UInt16? {
+        listener?.port?.rawValue
+    }
+
     private func accept(_ connection: NWConnection) {
         let key = ObjectIdentifier(connection)
         connections[key] = connection

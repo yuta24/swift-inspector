@@ -497,6 +497,7 @@ private struct FocusBar: View {
 
 private struct DevicePickerBar: View {
     @EnvironmentObject var model: AppInspectorModel
+    @State private var showsManualSheet: Bool = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -506,8 +507,9 @@ private struct DevicePickerBar: View {
                 Picker("Device", selection: selectedBinding) {
                     Text("No Device")
                         .tag(nil as String?)
-                    ForEach(model.discovered) { endpoint in
-                        // Verbatim — endpoint name is data (Bonjour service name).
+                    ForEach(model.allEndpoints) { endpoint in
+                        // Verbatim — endpoint name is data (Bonjour service
+                        // name or `host:port` for manual entries).
                         Text(verbatim: endpoint.name)
                             .tag(endpoint.id as String?)
                     }
@@ -526,10 +528,29 @@ private struct DevicePickerBar: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                Button {
+                    showsManualSheet = true
+                } label: {
+                    Label("Connect by IP…", systemImage: "network")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                // Disabled while a live connection is in flight so the
+                // sheet doesn't race the existing connection state
+                // machine. Browsing and discovered-list updates keep
+                // happening in the background.
+                .disabled(model.isConnecting || model.isAwaitingPairApproval)
+                .help("Connect by typing an IP address (when Bonjour discovery is blocked)")
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .sheet(isPresented: $showsManualSheet) {
+            ManualEndpointSheet()
+                .environmentObject(model)
+        }
     }
 
     private var selectedBinding: Binding<String?> {

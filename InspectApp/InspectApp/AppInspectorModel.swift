@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Network
 import InspectCore
 import os.log
 
@@ -34,6 +35,12 @@ enum LiveTransport: Equatable {
 @MainActor
 final class AppInspectorModel: ObservableObject {
     @Published var discovered: [InspectEndpoint] = []
+    /// User-typed endpoints that bypassed Bonjour discovery — added via
+    /// the "Connect by IP" sheet for environments where mDNS is blocked
+    /// (corp Wi-Fi with client isolation, guest networks, etc.). Lives
+    /// outside `discovered` so the browser's periodic refresh doesn't
+    /// wipe them, and so the UI can mark them visually.
+    @Published private(set) var manualEndpoints: [InspectEndpoint] = []
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
     @Published var selectedNodeID: UUID?
@@ -189,6 +196,55 @@ final class AppInspectorModel: ObservableObject {
 
     func startBrowsing() {
         connection.startBrowsing()
+    }
+
+    /// Combined list of Bonjour-discovered + manually-added endpoints,
+    /// in that order. The Picker binds to this so manually-typed
+    /// endpoints sit alongside discovered ones rather than living in a
+    /// separate UI surface — switching between a corp-network IP entry
+    /// and a guest-network Bonjour discovery is a single click.
+    var allEndpoints: [InspectEndpoint] {
+        // De-dup by id so a Bonjour result that resolves to the same
+        // host:port a user already typed doesn't show twice. Discovered
+        // wins on tie because its `name` carries the device's Bonjour
+        // service name (more readable than `192.168.1.42:8765`).
+        let discoveredIDs = Set(discovered.map(\.id))
+        let extras = manualEndpoints.filter { !discoveredIDs.contains($0.id) }
+        return discovered + extras
+    }
+
+    /// Adds a user-typed endpoint to the manual list and returns its
+    /// id so the caller (typically the "Connect by IP" sheet) can
+    /// immediately stage it as the active selection. Inputs that don't
+    /// parse as `host:port` return nil rather than producing a broken
+    /// endpoint that would fail at NWConnection construction time.
+    @discardableResult
+    func addManualEndpoint(host: String, port: UInt16) -> InspectEndpoint.ID? {
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty,
+              let nwPort = NWEndpoint.Port(rawValue: port) else {
+            return nil
+        }
+        let id = "manual:\(trimmedHost):\(port)"
+        // Idempotent re-add: typing the same host:port twice should
+        // surface the existing entry, not duplicate it.
+        if let existing = manualEndpoints.first(where: { $0.id == id }) {
+            return existing.id
+        }
+        let endpoint = InspectEndpoint(
+            id: id,
+            name: "\(trimmedHost):\(port)",
+            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(trimmedHost), port: nwPort)
+        )
+        manualEndpoints.append(endpoint)
+        return endpoint.id
+    }
+
+    /// Removes a previously-added manual endpoint. No-op for ids that
+    /// don't exist; not exposed as a UI action yet but tests and a
+    /// future "remove from list" affordance need a clean entry point.
+    func removeManualEndpoint(id: InspectEndpoint.ID) {
+        manualEndpoints.removeAll { $0.id == id }
     }
 
     func connect(to endpoint: InspectEndpoint) {
@@ -401,6 +457,15 @@ final class AppInspectorModel: ObservableObject {
 
     private func markConnected(endpointID: InspectEndpoint.ID?) {
         discovered = discovered.map { endpoint in
+            var copy = endpoint
+            copy.isConnected = (endpoint.id == endpointID)
+            return copy
+        }
+        // Manual endpoints share the same `isConnected` flag — without
+        // this mirror, the Picker would render a manual entry as
+        // "disconnected" even while the socket is up, since `allEndpoints`
+        // composes both lists verbatim.
+        manualEndpoints = manualEndpoints.map { endpoint in
             var copy = endpoint
             copy.isConnected = (endpoint.id == endpointID)
             return copy
