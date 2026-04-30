@@ -129,8 +129,15 @@ final class InspectClient {
         connection.receive(
             minimumIncompleteLength: Framing.headerSize,
             maximumLength: Framing.headerSize
-        ) { [weak self] header, _, isComplete, error in
-            guard let self, let connection = self.connection else { return }
+        ) { [weak self, connection] header, _, isComplete, error in
+            guard let self else { return }
+            // A `disconnect()` clears `self.connection`; a follow-up `connect()`
+            // installs a new NWConnection there. NWConnection still delivers
+            // any in-flight `receive` completions on the old object after
+            // cancel — without this identity check, that stale callback would
+            // call `failConnection` / `receiveNext` against the *new*
+            // connection and start a second parallel receive chain on it.
+            guard connection === self.connection else { return }
             if let error {
                 logger.error("Client header receive error: \(error.localizedDescription, privacy: .public)")
                 self.failConnection(connection, error: error)
@@ -145,13 +152,14 @@ final class InspectClient {
             connection.receive(
                 minimumIncompleteLength: length,
                 maximumLength: length
-            ) { [weak self] payload, _, isComplete, error in
+            ) { [weak self, connection] payload, _, isComplete, error in
                 // Re-do the weak unwrap explicitly — without `[weak self]`
                 // here NWConnection holds this completion, which would
                 // strong-capture the outer `self` (rebound non-optional
                 // by `guard let self`) and keep `InspectClient` alive
                 // even after `disconnect()` clears the `connection` ref.
                 guard let self else { return }
+                guard connection === self.connection else { return }
                 if let error {
                     logger.error("Client payload receive error: \(error.localizedDescription, privacy: .public)")
                     self.failConnection(connection, error: error)

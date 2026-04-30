@@ -7,7 +7,13 @@ struct PreferencesView: View {
     @AppStorage(UserPreferences.Keys.screenshotJPEGQuality)
     private var screenshotJPEGQuality: Double = 0.7
     @State private var figmaToken: String = FigmaTokenStore.load() ?? ""
-    @State private var didSaveFigmaToken: Bool = false
+    @State private var figmaTokenSaveStatus: FigmaTokenSaveStatus = .idle
+
+    private enum FigmaTokenSaveStatus {
+        case idle
+        case saved
+        case failed
+    }
 
     var body: some View {
         Form {
@@ -56,25 +62,40 @@ struct PreferencesView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SecureField("Personal Access Token", text: $figmaToken)
                         .textFieldStyle(.roundedBorder)
+                        // Clear the success/failure label as soon as the user
+                        // edits the field — leaving "Saved" beside a now-
+                        // different value, or a red "Couldn't save" beside a
+                        // freshly-typed token, both mislead about state.
+                        .onChange(of: figmaToken) { _, _ in
+                            figmaTokenSaveStatus = .idle
+                        }
                     HStack {
                         Button("Save") {
-                            FigmaTokenStore.save(figmaToken)
-                            didSaveFigmaToken = true
+                            figmaTokenSaveStatus = FigmaTokenStore.save(figmaToken)
+                                ? .saved
+                                : .failed
                         }
                         .disabled(figmaToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Button("Clear") {
                             figmaToken = ""
                             FigmaTokenStore.delete()
-                            didSaveFigmaToken = false
+                            figmaTokenSaveStatus = .idle
                         }
                         // Stays enabled while a token is stored even if the
                         // input field is empty — otherwise users have no way
                         // to remove a previously-saved token from Keychain.
                         Spacer()
-                        if didSaveFigmaToken {
+                        switch figmaTokenSaveStatus {
+                        case .idle:
+                            EmptyView()
+                        case .saved:
                             Text("Saved to Keychain")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        case .failed:
+                            Text("Couldn't save to Keychain. Unlock Keychain Access and try again.")
+                                .font(.caption)
+                                .foregroundStyle(.red)
                         }
                     }
                     Text("Issue a token at Figma → Settings → Security → Personal access tokens. `file_content:read` is enough. Saved to Keychain.")

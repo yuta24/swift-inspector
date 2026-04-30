@@ -156,6 +156,12 @@
         "ja" : { "stringUnit" : { "state" : "translated", "value" : "比較対象は選択の右側" } }
       }
     },
+    "Couldn't save to Keychain. Unlock Keychain Access and try again." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't save to Keychain. Unlock Keychain Access and try again." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keychain に保存できませんでした。「キーチェーンアクセス」のロックを解除してから再試行してください。" } }
+      }
+    },
     "Connect" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect" } },
@@ -580,6 +586,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Save this screenshot as a PNG" } },
         "ja" : { "stringUnit" : { "state" : "translated", "value" : "このスクリーンショットを PNG として保存" } }
+      }
+    },
+    "Saved to Keychain" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved to Keychain" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "Keychain に保存しました" } }
       }
     },
     "Screenshot" : {

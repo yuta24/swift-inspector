@@ -40,7 +40,12 @@ public enum Framing {
             UInt32(bigEndian: raw.loadUnaligned(as: UInt32.self))
         }
         let length = Int(value)
-        guard length >= 0, length <= maxPayloadBytes else { return nil }
+        // Reject zero-length frames as well as oversized ones. A length-0
+        // header would make the receiver call `receive(min: 0, max: 0)`,
+        // which the OS satisfies synchronously with an empty buffer; the
+        // caller would then schedule another header read against the same
+        // peer and burn a CPU core on a tight loop until either side cancels.
+        guard length > 0, length <= maxPayloadBytes else { return nil }
         return length
     }
 }

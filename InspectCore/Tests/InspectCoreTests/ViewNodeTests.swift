@@ -225,6 +225,20 @@ final class ViewNodeTests: XCTestCase {
         }
     }
 
+    func testFramingRejectsZeroLengthHeader() {
+        // A zero-length header would otherwise drive `receive(min: 0, max: 0)`
+        // into a tight loop of empty completions on the receive side.
+        var zero = UInt32(0).bigEndian
+        let header = Data(bytes: &zero, count: Framing.headerSize)
+        XCTAssertNil(Framing.parseLength(header))
+    }
+
+    func testFramingRejectsOversizedHeader() {
+        var huge = UInt32(Framing.maxPayloadBytes + 1).bigEndian
+        let header = Data(bytes: &huge, count: Framing.headerSize)
+        XCTAssertNil(Framing.parseLength(header))
+    }
+
     func testTypographyRoundtrip() throws {
         let typography = Typography(
             fontName: "SFUI-Semibold",

@@ -177,7 +177,14 @@ final class InspectListener {
             connection.receive(
                 minimumIncompleteLength: length,
                 maximumLength: length
-            ) { payload, _, isComplete, error in
+            ) { [weak self] payload, _, isComplete, error in
+                // Re-do the weak unwrap so the inner closure doesn't strong-
+                // capture `self` and keep `InspectListener` alive past
+                // `stop()`. NWConnection holds this completion until it
+                // either fires or the connection is fully torn down; without
+                // `[weak self]` here, a stale receive sitting in the OS's
+                // queue would extend the listener's lifetime indefinitely.
+                guard let self else { return }
                 if let error {
                     self.fail(connection, error: error)
                     return

@@ -1,5 +1,8 @@
 import Foundation
 import Security
+import os.log
+
+private let logger = Logger(subsystem: "swift-inspector", category: "figma-token")
 
 /// Keychain-backed storage for the Figma Personal Access Token. Kept out of
 /// `UserDefaults` because the PAT is a write-capable credential — anyone who
@@ -17,12 +20,17 @@ enum FigmaTokenStore {
 
     /// Saves `token`, replacing any previous value. Pass an empty (or
     /// whitespace-only) string to delete the entry instead — saving ""
-    /// would otherwise leave a useless stub in Keychain.
-    static func save(_ token: String) {
+    /// would otherwise leave a useless stub in Keychain. Returns `true` on
+    /// success and `false` when Keychain refuses the write — the caller must
+    /// surface that failure rather than treat it as a successful save.
+    /// `errSecInteractionNotAllowed` (Keychain locked at the moment of the
+    /// call) is the realistic failure mode worth flagging.
+    @discardableResult
+    static func save(_ token: String) -> Bool {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             delete()
-            return
+            return true
         }
         let data = Data(trimmed.utf8)
         let query: [String: Any] = [
@@ -36,12 +44,27 @@ enum FigmaTokenStore {
         let updateAttributes: [String: Any] = [
             kSecValueData as String: data,
         ]
-        let status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
-        if status == errSecItemNotFound {
+        let updateStatus = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
+        switch updateStatus {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
             var addQuery = query
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            SecItemAdd(addQuery as CFDictionary, nil)
+            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            if addStatus != errSecSuccess {
+                logger.error("FigmaTokenStore.save SecItemAdd failed: OSStatus=\(addStatus)")
+                return false
+            }
+            return true
+        default:
+            // Anything else (Keychain locked, ACL refused, daemon unhappy)
+            // means the previous token is still in place — surface the
+            // failure so the UI doesn't tell the user we saved when we
+            // didn't.
+            logger.error("FigmaTokenStore.save SecItemUpdate failed: OSStatus=\(updateStatus)")
+            return false
         }
     }
 
