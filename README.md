@@ -54,6 +54,34 @@ App Store. See [docs/privacy.md](docs/privacy.md) for the full posture.
 3. Select the device and press **Connect** to capture the current
    hierarchy, then use **Live** for auto-refreshing updates.
 
+### When Bonjour doesn't work
+
+Some Wi-Fi networks (corporate guest networks, conference rooms, hotels)
+block multicast DNS, which prevents Bonjour discovery from finding the
+device. The TCP listener itself is usually still reachable. To get
+around this:
+
+1. On the iOS device, open your debug menu and call
+   `InspectServer.presentConnectionInfo()` — see
+   [docs/integration.md](docs/integration.md#optional-show-the-ip-and-port-on-screen).
+   The device shows its IP and port (e.g. `192.168.1.42:8765`).
+2. In the AppInspector sidebar, click **Connect by IP…** and type
+   the host and port. The pairing prompt and the rest of the flow are
+   identical to a Bonjour-discovered connection.
+
+### Sharing snapshots offline (bug bundles)
+
+For asynchronous handoff to engineering — e.g. designer files a bug
+without keeping the device tethered — you can export the captured
+hierarchy (with screenshots and optional repro notes) as a single
+`.swiftinspector` JSON file:
+
+- **File ▷ Export Bug Bundle…** (⌘⇧E) saves the current capture.
+- **File ▷ Open Bug Bundle…** (⌘O), or drag a `.swiftinspector` file
+  onto the window, opens one for offline review. The 2D / 3D scene,
+  hierarchy tree, measurement tools, and Figma diff all work against
+  the archived data without a connected device.
+
 ## Installing the macOS client
 
 Download the latest `AppInspector-<version>.zip` from

@@ -671,6 +671,174 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The full report has been copied to the clipboard. Paste it into the code block below." } },
         "ja" : { "stringUnit" : { "state" : "translated", "value" : "完全なレポートをクリップボードにコピーしました。下のコードブロックに貼り付けてください" } }
       }
+    },
+    "%@ is not a swift-inspector bundle (.swiftinspector)." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ is not a swift-inspector bundle (.swiftinspector)." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "%@ は swift-inspector のバンドル（.swiftinspector）ではありません。" } }
+      }
+    },
+    "Bug Bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bug Bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バグバンドル" } }
+      }
+    },
+    "Close Bug Bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close Bug Bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バンドルを閉じる" } }
+      }
+    },
+    "Close bundle (⌘W)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close bundle (⌘W)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バンドルを閉じる（⌘W）" } }
+      }
+    },
+    "Connect by IP" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect by IP" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "IPアドレスで接続" } }
+      }
+    },
+    "Connect by IP…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect by IP…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "IPアドレスで接続…" } }
+      }
+    },
+    "Connect by typing an IP address (when Bonjour discovery is blocked)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect by typing an IP address (when Bonjour discovery is blocked)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "IPアドレスを直接入力して接続（Bonjour 検出が使えない環境向け）" } }
+      }
+    },
+    "Couldn't construct endpoint from input." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't construct endpoint from input." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "入力からエンドポイントを生成できませんでした。" } }
+      }
+    },
+    "Couldn't export bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't export bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バンドルを書き出せませんでした" } }
+      }
+    },
+    "Couldn't open bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't open bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バンドルを開けませんでした" } }
+      }
+    },
+    "Couldn't open dropped file" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't open dropped file" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ドロップされたファイルを開けませんでした" } }
+      }
+    },
+    "Couldn't open file: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't open file: %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ファイルを開けませんでした: %@" } }
+      }
+    },
+    "Couldn't read bundle: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn't read bundle: %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バンドルを読み込めませんでした: %@" } }
+      }
+    },
+    "Enter the host and port shown on the device's debug overlay. Use this when Bonjour discovery is blocked." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter the host and port shown on the device's debug overlay. Use this when Bonjour discovery is blocked." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "デバイスのデバッグオーバーレイに表示されているホストとポートを入力してください。Bonjour 検出が使えない環境向けの接続方法です。" } }
+      }
+    },
+    "Export" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "書き出し" } }
+      }
+    },
+    "Export Bug Bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export Bug Bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バグバンドルを書き出す" } }
+      }
+    },
+    "Export Bug Bundle…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export Bug Bundle…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バグバンドルを書き出す…" } }
+      }
+    },
+    "Host is required." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host is required." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ホストを入力してください。" } }
+      }
+    },
+    "Host or IP" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host or IP" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ホストまたは IP" } }
+      }
+    },
+    "Not a swift-inspector bundle: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not a swift-inspector bundle: %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "swift-inspector のバンドルではありません: %@" } }
+      }
+    },
+    "Notes (optional, e.g. repro steps)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notes (optional, e.g. repro steps)" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "メモ（任意。再現手順など）" } }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "OK" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "OK" } }
+      }
+    },
+    "Open" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "開く" } }
+      }
+    },
+    "Open Bug Bundle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Bug Bundle" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バグバンドルを開く" } }
+      }
+    },
+    "Open Bug Bundle…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Bug Bundle…" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "バグバンドルを開く…" } }
+      }
+    },
+    "Port" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Port" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ポート" } }
+      }
+    },
+    "Port must be 1–65535." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Port must be 1–65535." } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "ポートは 1〜65535 を指定してください。" } }
+      }
+    },
+    "offline: %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "offline: %@" } },
+        "ja" : { "stringUnit" : { "state" : "translated", "value" : "オフライン: %@" } }
+      }
     }
   }
 }

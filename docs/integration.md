@@ -78,3 +78,48 @@ SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) SWIFT_INSPECTOR_ENABLED
 The App Store build must leave it undefined so the inspection code is
 compiled out entirely. The `DEBUG || SWIFT_INSPECTOR_ENABLED` guard in
 source makes this the default when you do nothing special.
+
+## 5. Optional: show the IP and port on-screen
+
+Some Wi-Fi setups (corp guest networks, conference rooms, locked-down
+hotel Wi-Fi) block Bonjour while still routing direct TCP. Wire the
+following into your debug menu so designers and QA can read the
+device's listener address off the screen and type it into the macOS
+client's **Connect by IP…** sheet:
+
+```swift
+#if DEBUG || SWIFT_INSPECTOR_ENABLED
+Button("Show inspector connection info") {
+    InspectServer.presentConnectionInfo()
+}
+#endif
+```
+
+The call brings up an overlay with `host:port` in a large monospaced
+font. Tap outside the card to dismiss; long-press the address to copy
+it to the pasteboard for AirDrop / chat handoff.
+
+The function is a no-op (returns `false`, logs a warning to
+Console.app) when the listener is not running, when no usable IPv4
+interface is available (offline / cellular-only), or when there is no
+foreground `UIWindowScene` to host the overlay. Authorization is
+unchanged — every connection still goes through the device-side
+pairing prompt.
+
+## 6. Optional: stable Bonjour service name
+
+By default the published Bonjour service name comes from
+`UIDevice.current.name`, which on iOS 16+ returns the model
+("iPhone") for apps without a special entitlement. If you want a more
+recognizable label in the Mac client's device picker, pass an
+explicit `serviceName` at start time:
+
+```swift
+#if DEBUG || SWIFT_INSPECTOR_ENABLED
+InspectServer.start(serviceName: "QA-iPhone-Tanaka")
+#endif
+```
+
+This is the recommended way to disambiguate when several team
+members run the same model — e.g. read the value from a build-time
+configuration so each device builds with a distinct label.
