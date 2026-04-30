@@ -219,6 +219,7 @@ private struct DetailContentView: View {
 
 private struct SidebarView: View {
     @EnvironmentObject var model: AppInspectorModel
+    @EnvironmentObject var figmaModel: FigmaComparisonModel
 
     var body: some View {
         VStack(spacing: 0) {
@@ -235,7 +236,8 @@ private struct SidebarView: View {
                 roots: model.displayRoots,
                 selection: $model.selectedNodeID,
                 filter: $model.hierarchyFilter,
-                expandedPaths: $model.expandedPaths
+                expandedPaths: $model.expandedPaths,
+                differingIDs: figmaModel.differingNodeIDs
             )
         }
     }

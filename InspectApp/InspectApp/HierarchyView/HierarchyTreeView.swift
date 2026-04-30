@@ -6,6 +6,11 @@ struct HierarchyTreeView: View {
     @Binding var selection: UUID?
     @Binding var filter: HierarchyFilter
     @Binding var expandedPaths: Set<String>
+    /// View-node ids whose attributes diverge from the matched Figma layer.
+    /// Threaded through from the parent so the tree can offer a "Differing
+    /// only" filter toggle and so the filter struct itself can stay free of
+    /// transient comparison state.
+    var differingIDs: Set<UUID> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +29,8 @@ struct HierarchyTreeView: View {
                             root: root,
                             path: rootPath,
                             expandedPaths: $expandedPaths,
-                            filter: filter
+                            filter: filter,
+                            differingIDs: differingIDs
                         )
                     }
                 }
@@ -45,7 +51,7 @@ struct HierarchyTreeView: View {
             }
 
             if !roots.isEmpty {
-                FilterBar(filter: $filter, roots: roots)
+                FilterBar(filter: $filter, roots: roots, differingIDs: differingIDs)
             }
         }
     }
@@ -119,15 +125,16 @@ private struct FilteredOutlineGroup: View {
     let path: [String]
     @Binding var expandedPaths: Set<String>
     let filter: HierarchyFilter
+    let differingIDs: Set<UUID>
 
     var body: some View {
-        if filter.subtreeContainsMatch(root) {
+        if filter.subtreeContainsMatch(root, differingIDs: differingIDs) {
             let pathKey = path.joined(separator: "/")
             let indexedChildren = Array(root.children.enumerated())
             let filteredChildren = indexedChildren.filter { _, child in
-                filter.subtreeContainsMatch(child)
+                filter.subtreeContainsMatch(child, differingIDs: differingIDs)
             }
-            let isDimmed = !filter.matches(root)
+            let isDimmed = !filter.matches(root, differingIDs: differingIDs)
             if filteredChildren.isEmpty {
                 HierarchyNodeRow(
                     node: root,
@@ -143,7 +150,8 @@ private struct FilteredOutlineGroup: View {
                             root: child,
                             path: path + [child.stablePathSegment(siblingIndex: index)],
                             expandedPaths: $expandedPaths,
-                            filter: filter
+                            filter: filter,
+                            differingIDs: differingIDs
                         )
                     }
                 } label: {
@@ -162,12 +170,21 @@ private struct FilteredOutlineGroup: View {
     private func expandedBinding(for key: String) -> Binding<Bool> {
         Binding(
             get: {
-                // Auto-expand ancestor nodes whose only role is to host a
-                // matching descendant. Persisted `expandedPaths` still wins
-                // so a user who explicitly opens or closes a row during
-                // filtering keeps that intent.
+                // Auto-expand any node that has matching descendants —
+                // including nodes that match the filter themselves. The
+                // earlier "only non-matching ancestors" rule made sense
+                // for text search (the user drills down to one match)
+                // but hid the children when both parent and child satisfy
+                // the same filter — visible specifically with the
+                // Differing toggle, where parent + child often both differ
+                // and the walkthrough wants every diff in view at once.
+                // Persisted `expandedPaths` still wins so a user who
+                // explicitly opens or closes a row during filtering keeps
+                // that intent.
                 if expandedPaths.contains(key) { return true }
-                return !filter.matches(root)
+                return root.children.contains {
+                    filter.subtreeContainsMatch($0, differingIDs: differingIDs)
+                }
             },
             set: { newValue in
                 if newValue {
@@ -185,6 +202,7 @@ private struct FilteredOutlineGroup: View {
 private struct FilterBar: View {
     @Binding var filter: HierarchyFilter
     let roots: [ViewNode]
+    let differingIDs: Set<UUID>
 
     var body: some View {
         VStack(spacing: 0) {
@@ -228,6 +246,17 @@ private struct FilterBar: View {
                         systemImage: "circle.dotted",
                         isOn: $filter.showTransparent
                     )
+                    // Show the Differing toggle only when there's actually
+                    // diff data to act on, OR when the user already has it
+                    // enabled (so it doesn't disappear out from under them
+                    // mid-session if a refresh transiently empties the set).
+                    if !differingIDs.isEmpty || filter.showOnlyDiffering {
+                        FilterToggle(
+                            "Differing",
+                            systemImage: "arrow.triangle.branch",
+                            isOn: $filter.showOnlyDiffering
+                        )
+                    }
                     Spacer()
                 }
             }
@@ -249,7 +278,7 @@ private struct FilterBar: View {
     }
 
     private var matchCount: Int {
-        filter.countMatches(in: roots)
+        filter.countMatches(in: roots, differingIDs: differingIDs)
     }
 
     private static func countAll(in nodes: [ViewNode]) -> Int {
