@@ -3,6 +3,35 @@ import SceneKit
 import AppKit
 import InspectCore
 
+// MARK: - Canvas Mode
+
+/// Which renderer is currently driving the main canvas. Persisted via
+/// `@AppStorage` so the user lands on the mode they last left.
+enum CanvasMode: String, CaseIterable, Identifiable {
+    /// Flat, screen-faithful view with optional Figma overlay. Default —
+    /// matches the designer/QA mental model of "looking at the device".
+    case scene2D
+    /// SceneKit exploded layer stack. Use when the question is "what is
+    /// stacked behind what" rather than "does this match the spec".
+    case scene3D
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .scene2D: return "2D"
+        case .scene3D: return "3D"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .scene2D: return "rectangle"
+        case .scene3D: return "cube"
+        }
+    }
+}
+
 // MARK: - SwiftUI Container
 
 struct SceneViewContainer: View {
@@ -10,6 +39,7 @@ struct SceneViewContainer: View {
     @Binding var selectedNodeID: UUID?
     @Binding var measurementReferenceID: UUID?
     @Binding var measurementHoverID: UUID?
+    @AppStorage("canvasMode") private var mode: CanvasMode = .scene2D
     @State private var layerSpacing: Float = 30
     @State private var showLabels: Bool = true
     @State private var showGrid: Bool = false
@@ -29,6 +59,52 @@ struct SceneViewContainer: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            canvas
+
+            HStack(spacing: 16) {
+                ModeSegmentedControl(mode: $mode)
+                if mode == .scene3D {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.and.down.text.horizontal")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $layerSpacing, in: 0...80, step: 1)
+                            .frame(width: 120)
+                        Text("\(Int(layerSpacing))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, alignment: .trailing)
+                    }
+                    Toggle(isOn: $showLabels) {
+                        Image(systemName: "tag")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    GridToolbarControl(
+                        isOn: $showGrid,
+                        interval: $gridInterval,
+                        color: $gridColor
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+            .padding(12)
+        }
+    }
+
+    @ViewBuilder
+    private var canvas: some View {
+        switch mode {
+        case .scene2D:
+            Scene2DView(
+                roots: roots,
+                selectedNodeID: $selectedNodeID,
+                measurementReferenceID: $measurementReferenceID,
+                measurementHoverID: $measurementHoverID
+            )
+        case .scene3D:
             SceneKitView(
                 roots: roots,
                 selectedNodeID: $selectedNodeID,
@@ -40,35 +116,30 @@ struct SceneViewContainer: View {
                 gridInterval: gridInterval,
                 gridColor: gridColor
             )
-
-            HStack(spacing: 16) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.and.down.text.horizontal")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Slider(value: $layerSpacing, in: 0...80, step: 1)
-                        .frame(width: 120)
-                    Text("\(Int(layerSpacing))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, alignment: .trailing)
-                }
-                Toggle(isOn: $showLabels) {
-                    Image(systemName: "tag")
-                        .font(.caption)
-                }
-                .toggleStyle(.checkbox)
-                GridToolbarControl(
-                    isOn: $showGrid,
-                    interval: $gridInterval,
-                    color: $gridColor
-                )
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .padding(12)
         }
+    }
+}
+
+// MARK: - Mode Segmented Control
+
+/// Bottom-center segment that flips the canvas between 2D and 3D. Sized as
+/// a fixed two-button picker so the bar layout doesn't reflow when modes
+/// are added later.
+private struct ModeSegmentedControl: View {
+    @Binding var mode: CanvasMode
+
+    var body: some View {
+        Picker("", selection: $mode) {
+            ForEach(CanvasMode.allCases) { option in
+                Label(option.label, systemImage: option.systemImage)
+                    .labelStyle(.titleOnly)
+                    .tag(option)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help("Switch canvas mode (2D for spec/Figma compare, 3D for layer exploration)")
     }
 }
 
