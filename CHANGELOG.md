@@ -80,6 +80,9 @@ inspector for iOS apps with a designer-first macOS client.
 - Manually-added endpoints from "Connect by IP…" are kept in memory
   for the running session only; they need to be re-typed on next
   launch.
+- AppInspector ships without a custom app icon in this release;
+  Finder and the Dock show the generic placeholder. A real icon is
+  planned for a future version.
 
 [Unreleased]: https://github.com/yuta24/swift-inspector/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yuta24/swift-inspector/releases/tag/v0.1.0
