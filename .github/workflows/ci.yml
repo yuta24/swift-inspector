@@ -1,0 +1,54 @@
+# Continuous integration for pull requests targeting `main` and pushes
+# to `main`. Runs the test suite for both Swift packages (the library at
+# the repo root and the macOS client under `InspectApp/`) and verifies
+# that the iOS-side `InspectServer` target compiles against an iOS
+# Simulator destination — `swift test` only exercises the macOS slice,
+# so the `#if canImport(UIKit)`-gated code paths would otherwise drift
+# unchecked until someone integrates the package into a host iOS app.
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+# Cancel superseded runs on the same ref so a rebase / force-push doesn't
+# leave the previous run burning cycles. `release.yml` is keyed on tags
+# rather than branches, so it doesn't share this group.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Test library package (InspectCore + InspectServer)
+        run: swift test --parallel
+
+      - name: Test macOS client (AppInspector)
+        working-directory: InspectApp
+        run: swift test --parallel
+
+      - name: Build InspectServer for iOS Simulator
+        # `swift test` runs only on macOS, where the bulk of InspectServer
+        # is `#if canImport(UIKit)`-d out. Compile against an iOS Simulator
+        # destination so a typo in the UIKit branch is caught in CI rather
+        # than at integration time inside a host iOS app.
+        run: |
+          xcodebuild build \
+            -scheme InspectServer \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            -quiet
