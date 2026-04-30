@@ -17,12 +17,18 @@ enum ScreenshotCapture {
 
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = min(UIScreen.main.scale, 2)
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
-        let image = renderer.image { _ in
-            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        // Drain the UIImage that wraps the rendered bitmap once we've
+        // pulled the underlying CGImage out — the wrapping UIImage is
+        // hundreds of MB on a Pro Max and lingers in the outer
+        // autorelease pool until the runloop turns.
+        return autoreleasepool {
+            let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+            let image = renderer.image { _ in
+                window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+            }
+            guard let cgImage = image.cgImage else { return nil }
+            return (cgImage, format.scale)
         }
-        guard let cgImage = image.cgImage else { return nil }
-        return (cgImage, format.scale)
     }
 
     /// Crop a region from a window-level CGImage for a specific view (group screenshot).
@@ -48,38 +54,7 @@ enum ScreenshotCapture {
     /// Returns PNG data to preserve transparency for 3D layer compositing.
     @MainActor
     static func soloScreenshot(of view: UIView) -> Data? {
-        let layer = view.layer
-        let bounds = layer.bounds
-        guard bounds.width >= 1, bounds.height >= 1 else { return nil }
-
-        let scale = min(UIScreen.main.scale, 2)
-
-        // Temporarily hide sublayers at the CALayer level only.
-        // Avoid touching view.isHidden — it has broader side effects
-        // (layout, accessibility, animations) that can corrupt the live UI.
-        let sublayerStates: [(CALayer, Bool)] = (layer.sublayers ?? []).map { ($0, $0.isHidden) }
-        for sublayer in layer.sublayers ?? [] {
-            sublayer.isHidden = true
-        }
-
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = scale
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
-        let image = renderer.image { ctx in
-            layer.render(in: ctx.cgContext)
-        }
-
-        // Restore sublayer visibility
-        for (sublayer, wasHidden) in sublayerStates {
-            sublayer.isHidden = wasHidden
-        }
-
-        // Skip if the image is completely empty/transparent
-        guard let cgImage = image.cgImage else { return nil }
-        if isFullyTransparent(cgImage) { return nil }
-
-        return image.pngData()
+        soloScreenshotOfLayer(view.layer)
     }
 
     /// Crop a region from a window-level CGImage for a specific CALayer (group screenshot).
@@ -133,27 +108,40 @@ enum ScreenshotCapture {
 
         let scale = min(UIScreen.main.scale, 2)
 
+        // Snapshot every sublayer's prior `isHidden` so we can restore
+        // it deterministically — even if `layer.render(in:)` faults or
+        // an early return is added in the future. Without this, a
+        // failure between the hide loop and the restore loop would
+        // leave the host app's real UI with hidden sublayers.
         let sublayerStates: [(CALayer, Bool)] = (layer.sublayers ?? []).map { ($0, $0.isHidden) }
         for sublayer in layer.sublayers ?? [] {
             sublayer.isHidden = true
         }
-
-        let format = UIGraphicsImageRendererFormat.default()
-        format.scale = scale
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
-        let image = renderer.image { ctx in
-            layer.render(in: ctx.cgContext)
+        defer {
+            for (sublayer, wasHidden) in sublayerStates {
+                sublayer.isHidden = wasHidden
+            }
         }
 
-        for (sublayer, wasHidden) in sublayerStates {
-            sublayer.isHidden = wasHidden
+        // Drain the renderer's intermediate UIImage / CGImage every call.
+        // Capturing many solo screenshots in a single hierarchy walk
+        // would otherwise hold every bitmap in the autorelease pool
+        // until the next runloop turn, producing multi-hundred-MB
+        // transient spikes on a Pro Max-sized window.
+        return autoreleasepool {
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = scale
+            format.opaque = false
+            let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+            let image = renderer.image { ctx in
+                layer.render(in: ctx.cgContext)
+            }
+
+            guard let cgImage = image.cgImage else { return nil }
+            if isFullyTransparent(cgImage) { return nil }
+
+            return image.pngData()
         }
-
-        guard let cgImage = image.cgImage else { return nil }
-        if isFullyTransparent(cgImage) { return nil }
-
-        return image.pngData()
     }
 
     /// Check if a CGImage has no visible pixels.

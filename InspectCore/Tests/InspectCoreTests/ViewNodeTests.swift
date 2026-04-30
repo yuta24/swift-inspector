@@ -207,13 +207,22 @@ final class ViewNodeTests: XCTestCase {
         XCTAssertEqual(LayoutConstraint.relationSymbol(1), "≥")
     }
 
-    func testFramingRoundtrip() {
+    func testFramingRoundtrip() throws {
         let payload = Data("hello".utf8)
-        let framed = Framing.frame(payload)
+        let framed = try Framing.frame(payload)
         XCTAssertEqual(framed.count, Framing.headerSize + payload.count)
 
         let header = framed.prefix(Framing.headerSize)
         XCTAssertEqual(Framing.parseLength(header), payload.count)
+    }
+
+    func testFramingRejectsOversizedPayload() {
+        let oversized = Data(count: Framing.maxPayloadBytes + 1)
+        XCTAssertThrowsError(try Framing.frame(oversized)) { error in
+            guard case Framing.FramingError.payloadTooLarge = error else {
+                return XCTFail("expected payloadTooLarge, got \(error)")
+            }
+        }
     }
 
     func testTypographyRoundtrip() throws {

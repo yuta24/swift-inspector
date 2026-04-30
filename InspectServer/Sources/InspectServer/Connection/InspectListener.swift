@@ -42,24 +42,44 @@ final class InspectListener {
     }
 
     func start() throws {
-        stop()
-        let params = NWParameters.tcp
-        params.includePeerToPeer = true
-        let listener = try NWListener(using: params)
-        listener.service = NWListener.Service(
-            name: serviceName,
-            type: InspectProtocol.bonjourServiceType
-        )
-        listener.newConnectionHandler = { [weak self] connection in
-            logger.info("Accepted new connection")
-            self?.accept(connection)
+        // Serialize the entire (re)start with queue-resident state mutation
+        // so a teardown of any prior listener and the install of a new one
+        // can't interleave with `accept()` / `stateUpdateHandler` callbacks
+        // that also run on `queue`.
+        var thrownError: Error?
+        queue.sync {
+            self.stopOnQueue()
+            let params = NWParameters.tcp
+            params.includePeerToPeer = true
+            do {
+                let listener = try NWListener(using: params)
+                listener.service = NWListener.Service(
+                    name: self.serviceName,
+                    type: InspectProtocol.bonjourServiceType
+                )
+                listener.newConnectionHandler = { [weak self] connection in
+                    logger.info("Accepted new connection")
+                    self?.accept(connection)
+                }
+                listener.start(queue: self.queue)
+                self.listener = listener
+                logger.info("Listener started: service=\(self.serviceName, privacy: .public)")
+            } catch {
+                thrownError = error
+            }
         }
-        listener.start(queue: queue)
-        self.listener = listener
-        logger.info("Listener started: service=\(self.serviceName, privacy: .public)")
+        if let thrownError { throw thrownError }
     }
 
     func stop() {
+        queue.sync { self.stopOnQueue() }
+    }
+
+    /// Tear down listener and connection state. **Must run on `queue`** so
+    /// it serializes with `accept()`, `stateUpdateHandler`, and
+    /// `cleanupConnectionState` which all touch the same dictionaries.
+    private func stopOnQueue() {
+        dispatchPrecondition(condition: .onQueue(queue))
         listener?.cancel()
         listener = nil
         for connection in connections.values {
@@ -76,7 +96,10 @@ final class InspectListener {
     /// the macOS client. Nil before `start()` resolves a port and
     /// after `stop()` clears the listener.
     var boundPort: UInt16? {
-        listener?.port?.rawValue
+        // Read through `queue` so we never observe a torn / partially
+        // assigned `listener` reference while `start` / `stop` are
+        // racing on a different thread.
+        queue.sync { listener?.port?.rawValue }
     }
 
     private func accept(_ connection: NWConnection) {
@@ -365,7 +388,21 @@ final class InspectListener {
             }
             return
         }
-        let framed = Framing.frame(data)
+        let framed: Data
+        do {
+            framed = try Framing.frame(data)
+        } catch {
+            // Capture exceeded the wire cap. Don't try to ship it — the
+            // peer would just drop the connection on parseLength. Log
+            // diagnostics and try to inform the client with a small
+            // error message it can surface to the user.
+            logger.error("Server framing failed: \(String(describing: error), privacy: .public)")
+            if case .hierarchy(let roots) = message {
+                Self.logEncodingDiagnostics(roots: roots)
+            }
+            sendBestEffortError("capture too large to transmit", on: connection)
+            return
+        }
         logger.info("Server sending \(framed.count) bytes (payload: \(data.count) bytes)")
         connection.send(content: framed, completion: .contentProcessed { error in
             if let error {
@@ -374,6 +411,16 @@ final class InspectListener {
                 logger.debug("Server send completed successfully")
             }
         })
+    }
+
+    /// Send a small `.error` message without going back through `send` —
+    /// reserved for the case where the original send already failed at the
+    /// framing/encoding layer and we want to give the client *something*
+    /// rather than a silent EOF.
+    private func sendBestEffortError(_ reason: String, on connection: NWConnection) {
+        guard let data = try? serializer.encode(.error(reason)),
+              let framed = try? Framing.frame(data) else { return }
+        connection.send(content: framed, completion: .contentProcessed { _ in })
     }
 
     private func fail(_ connection: NWConnection, error: Error) {

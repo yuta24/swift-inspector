@@ -39,6 +39,11 @@ private let logger = Logger(subsystem: "swift-inspector", category: "server")
 /// declaration only gates `NWBrowser` (the macOS client side), and macOS
 /// itself does not enforce it.
 public enum InspectServer {
+    /// Serializes access to the `listener` slot so two threads racing on
+    /// `start()` / `stop()` can't both observe `nil` and install duplicate
+    /// listeners (which would publish the same Bonjour name twice and
+    /// orphan one of them). Plain `static var` access is not atomic.
+    private static let stateLock = NSLock()
     private static var listener: InspectListener?
 
     /// Starts publishing the Bonjour service and accepting client
@@ -56,9 +61,20 @@ public enum InspectServer {
     ///   Override when you want a stable identifier across devices (e.g.
     ///   "QA iPhone — Checkout flow").
     public static func start(serviceName: String? = nil) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         if listener != nil { return }
         let instance = InspectListener(serviceName: serviceName)
         do {
+            // Hold the lock through `instance.start()` so a concurrent
+            // `stop()` cannot interleave between the slot assignment and
+            // the actual socket bind — otherwise `stop()` would capture
+            // and tear down an instance whose `NWListener` hasn't been
+            // installed yet, then this thread would happily install one
+            // and leave it orphaned (publishing Bonjour while
+            // `InspectServer.listener == nil`). `instance.start()` does
+            // a quick `queue.sync` to install the listener; it does not
+            // re-enter `InspectServer`, so there's no deadlock risk.
             try instance.start()
             listener = instance
         } catch {
@@ -69,8 +85,14 @@ public enum InspectServer {
     /// Tears down the listener and disconnects every active client. Safe to
     /// call when not running.
     public static func stop() {
-        listener?.stop()
+        stateLock.lock()
+        let captured = listener
         listener = nil
+        stateLock.unlock()
+        // Tear the listener down outside the lock — `InspectListener.stop`
+        // does its own internal queue.sync and we don't want to hold two
+        // locks at once.
+        captured?.stop()
     }
 
     /// Forgets every Mac that was previously approved on the device-side
@@ -103,7 +125,10 @@ public enum InspectServer {
     @discardableResult
     public static func presentConnectionInfo() -> Bool {
         #if canImport(UIKit)
-        guard let listener, let port = listener.boundPort else {
+        stateLock.lock()
+        let captured = listener
+        stateLock.unlock()
+        guard let captured, let port = captured.boundPort else {
             // Logged at warning level so a debug-menu user wiring this
             // up sees a meaningful trace in Console.app instead of a
             // silent no-op when they forgot to call `start()` first.

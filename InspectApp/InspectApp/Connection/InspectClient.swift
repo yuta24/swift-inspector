@@ -68,7 +68,7 @@ final class InspectClient {
         }
         do {
             let data = try serializer.encode(message)
-            let framed = Framing.frame(data)
+            let framed = try Framing.frame(data)
             logger.info("Client sending \(framed.count) bytes")
             connection.send(content: framed, completion: .contentProcessed { error in
                 if let error {
