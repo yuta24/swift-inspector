@@ -654,7 +654,7 @@ private struct ScreenshotSection: View {
     var body: some View {
         let data = showSolo ? node.soloScreenshot : node.screenshot
         if data != nil || node.soloScreenshot != nil {
-            GroupBox {
+            CollapsibleSection(id: "screenshot", title: "Screenshot", icon: "camera.viewfinder") {
                 VStack(spacing: 8) {
                     if let data, let image = NSImage(data: data) {
                         Image(nsImage: image)
@@ -698,8 +698,6 @@ private struct ScreenshotSection: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(4)
-            } label: {
-                SectionHeader("Screenshot", icon: "camera.viewfinder")
             }
         }
     }
@@ -717,7 +715,7 @@ private struct FigmaDiffSection: View {
 
     var body: some View {
         if let match = figmaModel.match(for: node), let diff = figmaModel.diff(for: node) {
-            GroupBox {
+            CollapsibleSection(id: "figmaDiff", title: "Figma Diff", icon: "arrow.triangle.branch") {
                 VStack(alignment: .leading, spacing: 6) {
                     matchHeader(match: match)
                     if diff.items.isEmpty {
@@ -733,8 +731,6 @@ private struct FigmaDiffSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
-            } label: {
-                SectionHeader("Figma Diff", icon: "arrow.triangle.branch")
             }
         }
     }
@@ -849,7 +845,7 @@ private struct FrameSection: View {
     let safeAreaInsets: InspectCore.EdgeInsets?
 
     var body: some View {
-        GroupBox {
+        CollapsibleSection(id: "frame", title: "Frame", icon: "rectangle.dashed") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 12) {
                     fieldPair(label: "X", value: frame.origin.x)
@@ -873,8 +869,6 @@ private struct FrameSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
-        } label: {
-            SectionHeader("Frame", icon: "rectangle.dashed")
         }
     }
 
@@ -909,7 +903,7 @@ private struct AppearanceSection: View {
     let node: ViewNode
 
     var body: some View {
-        GroupBox {
+        CollapsibleSection(id: "appearance", title: "Appearance", icon: "paintbrush") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     PropertyLabel("isHidden")
@@ -943,8 +937,6 @@ private struct AppearanceSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
-        } label: {
-            SectionHeader("Appearance", icon: "paintbrush")
         }
     }
 }
@@ -976,7 +968,7 @@ private struct LayerSection: View {
         let hasContent = node.clipsToBounds || node.cornerRadius > 0
             || node.borderWidth > 0 || node.borderColor != nil
         if hasContent {
-            GroupBox {
+            CollapsibleSection(id: "layer", title: "Layer", icon: "square.stack.3d.up") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         PropertyLabel("clipsToBounds")
@@ -1003,8 +995,6 @@ private struct LayerSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
-            } label: {
-                SectionHeader("Layer", icon: "square.stack.3d.up")
             }
         }
     }
@@ -1016,7 +1006,7 @@ private struct InteractionSection: View {
     let node: ViewNode
 
     var body: some View {
-        GroupBox {
+        CollapsibleSection(id: "interaction", title: "Interaction", icon: "hand.tap") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     PropertyLabel("userInteraction")
@@ -1041,8 +1031,6 @@ private struct InteractionSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
-        } label: {
-            SectionHeader("Interaction", icon: "hand.tap")
         }
     }
 }
@@ -1054,7 +1042,7 @@ private struct TypePropertiesSection: View {
 
     var body: some View {
         if !properties.isEmpty {
-            GroupBox {
+            CollapsibleSection(id: "properties", title: "Properties", icon: "list.bullet.rectangle") {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(properties.keys.sorted(), id: \.self) { key in
                         HStack(spacing: 8) {
@@ -1068,8 +1056,6 @@ private struct TypePropertiesSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
-            } label: {
-                SectionHeader("Properties", icon: "list.bullet.rectangle")
             }
         }
     }
@@ -1082,7 +1068,7 @@ private struct AccessibilitySection: View {
 
     var body: some View {
         if node.accessibilityIdentifier != nil || node.accessibilityLabel != nil {
-            GroupBox {
+            CollapsibleSection(id: "accessibility", title: "Accessibility", icon: "accessibility") {
                 VStack(alignment: .leading, spacing: 6) {
                     if let identifier = node.accessibilityIdentifier {
                         HStack(spacing: 8) {
@@ -1099,8 +1085,6 @@ private struct AccessibilitySection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
-            } label: {
-                SectionHeader("Accessibility", icon: "accessibility")
             }
         }
     }
@@ -1116,7 +1100,7 @@ private struct MeasurementSection: View {
     let onNavigate: (UUID) -> Void
 
     var body: some View {
-        GroupBox {
+        CollapsibleSection(id: "measurement", title: "Measurement", icon: "ruler") {
             VStack(alignment: .leading, spacing: 8) {
                 hintRow
                 pinButton
@@ -1133,8 +1117,6 @@ private struct MeasurementSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
-        } label: {
-            SectionHeader("Measurement", icon: "ruler")
         }
     }
 
@@ -1283,7 +1265,11 @@ private struct ConstraintsSection: View {
 
     var body: some View {
         if !node.constraints.isEmpty {
-            GroupBox {
+            CollapsibleSection(
+                id: "constraints",
+                title: "Constraints (\(node.constraints.count))",
+                icon: "ruler"
+            ) {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(node.constraints.enumerated()), id: \.offset) { _, constraint in
                         ConstraintRow(
@@ -1295,8 +1281,6 @@ private struct ConstraintsSection: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(4)
-            } label: {
-                SectionHeader("Constraints (\(node.constraints.count))", icon: "ruler")
             }
         }
     }
@@ -1405,7 +1389,7 @@ private struct TypographySection: View {
     let typography: Typography
 
     var body: some View {
-        GroupBox {
+        CollapsibleSection(id: "typography", title: "Typography", icon: "textformat") {
             VStack(alignment: .leading, spacing: 6) {
                 fontRow
                 metricsGrid
@@ -1440,8 +1424,6 @@ private struct TypographySection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
-        } label: {
-            SectionHeader("Typography", icon: "textformat")
         }
     }
 
@@ -1570,19 +1552,65 @@ private struct ColorSwatch: View {
 
 // MARK: - Helpers
 
-private struct SectionHeader: View {
-    let title: LocalizedStringKey
-    let icon: String
+/// Collapsible inspector section. Replaces the bare `GroupBox` + label
+/// pattern used to live here with a tappable header that toggles the
+/// content visibility, persisting expanded state per section so the
+/// designer / engineer that prefers a different layout doesn't have to
+/// re-curate the inspector on every relaunch.
+///
+/// `id` is the storage key suffix — passed verbatim into UserDefaults via
+/// `@AppStorage("inspector.section.<id>.expanded")`. Pick a stable, short
+/// snake_case identifier; renaming it later resets every existing user's
+/// preference for that section, so don't churn it.
+private struct CollapsibleSection<Content: View>: View {
+    @AppStorage private var isExpanded: Bool
+    private let title: LocalizedStringKey
+    private let icon: String
+    private let content: () -> Content
 
-    init(_ title: LocalizedStringKey, icon: String) {
+    init(
+        id: String,
+        title: LocalizedStringKey,
+        icon: String,
+        defaultExpanded: Bool = true,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.title = title
         self.icon = icon
+        self.content = content
+        self._isExpanded = AppStorage(
+            wrappedValue: defaultExpanded,
+            "inspector.section.\(id).expanded"
+        )
     }
 
     var body: some View {
-        Label(title, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+        GroupBox {
+            // GroupBox always reserves room for content; emitting an
+            // EmptyView when collapsed lets the box shrink to just its
+            // label height instead of leaving a hollow padding band.
+            if isExpanded {
+                content()
+            }
+        } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Label(title, systemImage: icon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 
