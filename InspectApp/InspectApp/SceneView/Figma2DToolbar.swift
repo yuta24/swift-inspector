@@ -21,6 +21,7 @@ struct Figma2DToolbar: View {
             urlRow
             statusRow
             controlRow
+            diffSummaryRow
             if let warning = figmaModel.sizeWarning, figmaModel.image != nil {
                 sizeMismatchBanner(warning)
             }
@@ -161,6 +162,143 @@ struct Figma2DToolbar: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
+    }
+
+    // MARK: - Diff summary + walkthrough
+
+    /// Headline of the comparison: "Diff M of N" with chevron buttons that
+    /// step through differing nodes (⌘[ / ⌘]). Hidden until the matcher has
+    /// found at least one ViewNode → Figma layer pairing — that's the
+    /// earliest moment the verdict (match / differ) can be trusted. The
+    /// list of differences is taken from `model.displayRoots` so a focused
+    /// subtree narrows both the count and the navigation; clearing focus
+    /// re-exposes the full hierarchy.
+    @ViewBuilder
+    private var diffSummaryRow: some View {
+        if figmaModel.image != nil, !figmaModel.matches.isEmpty {
+            let ordered = orderedDifferingIDs()
+            if ordered.isEmpty {
+                allMatchRow
+            } else {
+                differencesRow(ordered: ordered)
+            }
+        }
+    }
+
+    private var allMatchRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle")
+                .foregroundStyle(.green)
+            Text(focusActiveSuffix("Matches Figma"))
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func differencesRow(ordered: [UUID]) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.branch")
+                .foregroundStyle(.orange)
+            Text(verbatim: differenceCountLabel(ordered: ordered))
+                .font(.caption.weight(.semibold))
+                .help(walkthroughHelp(ordered: ordered))
+            Spacer(minLength: 0)
+            Button {
+                jumpToDiff(direction: .previous, ordered: ordered)
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("[", modifiers: .command)
+            .help("Previous difference (⌘[)")
+            Button {
+                jumpToDiff(direction: .next, ordered: ordered)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("]", modifiers: .command)
+            .help("Next difference (⌘])")
+        }
+    }
+
+    /// "Diff M of N" when the selected node is one of the diffs;
+    /// otherwise "N differences" (or the singular form). The "M of N"
+    /// form anchors the user to the walkthrough position so the chevrons
+    /// don't feel like they're pointing into nothing.
+    private func differenceCountLabel(ordered: [UUID]) -> String {
+        let total = ordered.count
+        if let selectedID = model.selectedNodeID,
+           let idx = ordered.firstIndex(of: selectedID) {
+            return focusActiveSuffix(
+                String(format: String(localized: "Diff %d of %d"), idx + 1, total)
+            )
+        }
+        if total == 1 {
+            return focusActiveSuffix(String(localized: "1 difference"))
+        }
+        return focusActiveSuffix(
+            String(format: String(localized: "%d differences"), total)
+        )
+    }
+
+    /// Adds " (in focus)" when the diff scope is constrained to a focused
+    /// subtree. Designers asked us to make scope visible in the headline
+    /// because "12 differences" looks like a global statement.
+    private func focusActiveSuffix(_ base: String) -> String {
+        guard model.focusedNodeID != nil else { return base }
+        return base + " " + String(localized: "(in focus)")
+    }
+
+    private func walkthroughHelp(ordered: [UUID]) -> String {
+        if model.focusedNodeID != nil {
+            return String(localized: "Walk through the differences within the focused subtree")
+        }
+        return String(localized: "Walk through every node whose attributes differ from Figma")
+    }
+
+    private enum DiffNavDirection { case next, previous }
+
+    /// Steps the selection through `ordered`. Wraps at both ends so the
+    /// walkthrough has no dead-end. The first invocation when nothing is
+    /// selected jumps to either the first (next) or the last (previous)
+    /// entry, so a fresh user can press ⌘] without thinking.
+    private func jumpToDiff(direction: DiffNavDirection, ordered: [UUID]) {
+        guard !ordered.isEmpty else { return }
+        let currentIndex = model.selectedNodeID.flatMap { ordered.firstIndex(of: $0) }
+        let nextIndex: Int = {
+            switch direction {
+            case .next:
+                if let i = currentIndex { return (i + 1) % ordered.count }
+                return 0
+            case .previous:
+                if let i = currentIndex { return (i - 1 + ordered.count) % ordered.count }
+                return ordered.count - 1
+            }
+        }()
+        model.selectedNodeID = ordered[nextIndex]
+    }
+
+    /// Pre-order walk over `displayRoots` that returns every differing
+    /// node id in tree order. Visible-scope only: when focus is active
+    /// `displayRoots` is just the focused subtree, so the walkthrough
+    /// stays inside what the user can actually see.
+    private func orderedDifferingIDs() -> [UUID] {
+        let differing = figmaModel.differingNodeIDs
+        guard !differing.isEmpty else { return [] }
+        var output: [UUID] = []
+        var stack: [ViewNode] = Array(model.displayRoots.reversed())
+        while let node = stack.popLast() {
+            if differing.contains(node.ident) {
+                output.append(node.ident)
+            }
+            for child in node.children.reversed() {
+                stack.append(child)
+            }
+        }
+        return output
     }
 
     // MARK: - Size mismatch banner
