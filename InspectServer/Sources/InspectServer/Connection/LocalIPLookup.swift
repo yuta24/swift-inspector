@@ -45,9 +45,15 @@ enum LocalIPLookup {
             guard sockaddr.pointee.sa_family == UInt8(AF_INET) else { continue }
 
             var hostBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            // `sa_family == AF_INET` is already enforced above, so
+            // pass the canonical `sockaddr_in` size rather than reading
+            // the BSD-only `sa_len` field. Avoids cross-platform
+            // surprises if this code is ever compiled for a non-Darwin
+            // target (Linux CI / future platform sims).
+            let addressLength = socklen_t(MemoryLayout<sockaddr_in>.size)
             let result = getnameinfo(
                 sockaddr,
-                socklen_t(interface.ifa_addr.pointee.sa_len),
+                addressLength,
                 &hostBuffer,
                 socklen_t(hostBuffer.count),
                 nil,

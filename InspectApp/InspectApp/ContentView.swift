@@ -689,8 +689,14 @@ private struct ConnectionActionButton: View {
     private func perform(_ action: Action) {
         switch action {
         case .connect, .retry, .switchDevice:
+            // Search `allEndpoints` (discovered + manual), not just
+            // `discovered`. Otherwise Connect/Retry/Switch are silent
+            // no-ops for any manually-typed IP after the first connect:
+            // the sheet's submit() reaches the connection path directly,
+            // but every subsequent reconnect goes through this button
+            // and would silently fail.
             guard let id = model.selectedEndpointID,
-                  let endpoint = model.discovered.first(where: { $0.id == id }) else {
+                  let endpoint = model.allEndpoints.first(where: { $0.id == id }) else {
                 return
             }
             model.connect(to: endpoint)
@@ -705,7 +711,11 @@ private struct ConnectionActionButton: View {
         case .cancel: return String(localized: "Cancel this connection attempt")
         case .disconnect: return String(localized: "Disconnect")
         case .switchDevice:
-            let name = model.discovered
+            // Same allEndpoints lookup as `perform` — otherwise the
+            // tooltip on a Switch action targeted at a manual endpoint
+            // would render "Disconnect and connect to the selected
+            // device" instead of the actual host:port label.
+            let name = model.allEndpoints
                 .first(where: { $0.id == model.selectedEndpointID })?.name
                 ?? String(localized: "the selected device")
             return String(localized: "Disconnect and connect to \(name)")

@@ -40,6 +40,12 @@ final class AppInspectorModel: ObservableObject {
     /// (corp Wi-Fi with client isolation, guest networks, etc.). Lives
     /// outside `discovered` so the browser's periodic refresh doesn't
     /// wipe them, and so the UI can mark them visually.
+    ///
+    /// In-memory only for now — daily designer/QA flows on the same
+    /// corp network will re-type the same IP every launch. TODO:
+    /// persist across launches (UserDefaults keyed by host:port,
+    /// pruned when stale) once we have a clear UI surface for
+    /// removing entries the user no longer wants.
     @Published private(set) var manualEndpoints: [InspectEndpoint] = []
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
@@ -455,7 +461,12 @@ final class AppInspectorModel: ObservableObject {
         expandedPaths = []
     }
 
-    private func markConnected(endpointID: InspectEndpoint.ID?) {
+    /// Marks `endpointID` as the connected endpoint across both the
+    /// Bonjour-discovered list and the manually-added list. Pass `nil`
+    /// to clear all flags (called from `finalizeDisconnectState`).
+    /// Internal rather than private so tests can directly verify the
+    /// flag mirroring without faking an entire connection lifecycle.
+    func markConnected(endpointID: InspectEndpoint.ID?) {
         discovered = discovered.map { endpoint in
             var copy = endpoint
             copy.isConnected = (endpoint.id == endpointID)

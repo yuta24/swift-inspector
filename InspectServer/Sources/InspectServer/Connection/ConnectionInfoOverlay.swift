@@ -53,11 +53,17 @@ enum ConnectionInfoOverlay {
     }
 
     private static func activeScene() -> UIWindowScene? {
+        // Restrict to scenes the user could actually see — falling back
+        // to `scenes.first` would happily attach the overlay to a
+        // backgrounded scene, where it sits invisible until the next
+        // foreground transition then pops up unexpectedly. iPad
+        // split-view counts `.foregroundInactive` as visible (the
+        // sibling scene has focus), so we accept both states.
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         if let foreground = scenes.first(where: { $0.activationState == .foregroundActive }) {
             return foreground
         }
-        return scenes.first
+        return scenes.first(where: { $0.activationState == .foregroundInactive })
     }
 
     private static let defaultInstructions = "AppInspector → Sidebar → Connect by IP… にホスト/ポートを入力してください。"

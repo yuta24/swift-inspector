@@ -15,6 +15,12 @@ struct ManualEndpointSheet: View {
     @State private var hostInput: String = ""
     @State private var portInput: String = ""
     @State private var validationError: String?
+    /// Latched the moment the user taps Connect so a double-tap (or a
+    /// re-render race before `dismiss()` commits) doesn't fire two
+    /// `model.connect(to:)` calls. Without this, the second call tears
+    /// down the half-open NWConnection from the first, observable as a
+    /// noticeably delayed first-connect.
+    @State private var isSubmitting: Bool = false
 
     /// Most TestFlight builds default to a non-privileged ephemeral
     /// port chosen by NWListener; surfacing a hint here saves users
@@ -51,7 +57,7 @@ struct ManualEndpointSheet: View {
                 Button("Connect") { submit() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(!isInputValid)
+                    .disabled(!isInputValid || isSubmitting)
             }
         }
         .padding(20)
@@ -73,6 +79,7 @@ struct ManualEndpointSheet: View {
     }
 
     private func submit() {
+        guard !isSubmitting else { return }
         let host = hostInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else {
             validationError = String(localized: "Host is required.")
@@ -86,6 +93,7 @@ struct ManualEndpointSheet: View {
             validationError = String(localized: "Couldn't construct endpoint from input.")
             return
         }
+        isSubmitting = true
         // Stage as the active selection so the existing Connect button
         // in the sidebar handles the actual NWConnection lifecycle.
         // Connecting from inside the sheet would split the connection

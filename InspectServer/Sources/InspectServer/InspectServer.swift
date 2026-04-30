@@ -1,5 +1,8 @@
 #if DEBUG || SWIFT_INSPECTOR_ENABLED
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "swift-inspector", category: "server")
 
 /// Entry point for the inspector server embedded in the host iOS app.
 ///
@@ -101,9 +104,14 @@ public enum InspectServer {
     public static func presentConnectionInfo() -> Bool {
         #if canImport(UIKit)
         guard let listener, let port = listener.boundPort else {
+            // Logged at warning level so a debug-menu user wiring this
+            // up sees a meaningful trace in Console.app instead of a
+            // silent no-op when they forgot to call `start()` first.
+            logger.warning("presentConnectionInfo: listener is not running; call InspectServer.start() first")
             return false
         }
         guard let address = LocalIPLookup.bestIPv4Address() else {
+            logger.warning("presentConnectionInfo: no usable IPv4 interface (offline / cellular-only / link-local)")
             return false
         }
         ConnectionInfoOverlay.show(host: address, port: port)
