@@ -47,6 +47,40 @@ enum HierarchyRemapping {
         return nil
     }
 
+    /// Returns the ancestor chain for `id`, ordered from the outermost root
+    /// down to the immediate parent. The target node itself is intentionally
+    /// excluded — callers that want the full chain including the selection
+    /// (e.g. a breadcrumb that highlights the current node) should append
+    /// the target node themselves, since the inspector header already
+    /// renders the selection name and would double-show it otherwise.
+    /// Returns an empty array when the id sits at the top level or doesn't
+    /// exist in the tree.
+    static func ancestors(of id: UUID, in roots: [ViewNode]) -> [ViewNode] {
+        for root in roots {
+            var trail: [ViewNode] = []
+            if collectAncestors(target: id, in: root, trail: &trail) {
+                return trail
+            }
+        }
+        return []
+    }
+
+    private static func collectAncestors(
+        target: UUID,
+        in node: ViewNode,
+        trail: inout [ViewNode]
+    ) -> Bool {
+        if node.id == target { return true }
+        trail.append(node)
+        for child in node.children {
+            if collectAncestors(target: target, in: child, trail: &trail) {
+                return true
+            }
+        }
+        trail.removeLast()
+        return false
+    }
+
     static func findNode(byPath path: [String], in roots: [ViewNode]) -> ViewNode? {
         guard let first = path.first else { return nil }
         for (index, root) in roots.enumerated() {

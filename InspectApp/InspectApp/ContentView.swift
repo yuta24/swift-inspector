@@ -30,8 +30,17 @@ struct ContentView: View {
             figmaModel.updateRoots(model.roots)
         }
         .inspector(isPresented: $showInspector) {
+            // Compute the ancestor chain at the call site and pass it in as
+            // a `let` so `InspectorView` stays a pure value-driven struct.
+            // Pulling the walk out of the inspector body avoids adding a
+            // second `@EnvironmentObject` subscription that would re-fire on
+            // every Published change; here it amortises into the same body
+            // cycle as `model.selectedNode`.
             InspectorView(
                 node: model.selectedNode,
+                ancestors: model.selectedNodeID.map {
+                    HierarchyRemapping.ancestors(of: $0, in: model.roots)
+                } ?? [],
                 compareNode: model.measurementCompareNode,
                 isHoveringCompare: model.measurementHoverID != nil,
                 selectedNodeID: $model.selectedNodeID,
@@ -370,17 +379,6 @@ private struct DevicePickerBar: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
-                if model.isLiveMode, let badge = transportBadge {
-                    Text(badge)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.secondary.opacity(0.15))
-                        )
-                }
             }
         }
         .padding(.horizontal, 12)
@@ -403,36 +401,32 @@ private struct DevicePickerBar: View {
         )
     }
 
-    @ViewBuilder
+    /// Static colored dot — the toolbar's `ActivityIndicator` already shows
+    /// a spinner during connect / awaiting-pair / inflight, so keeping the
+    /// sidebar indicator stateful here was double-signalling. The color is
+    /// enough state info next to the status text.
     private var statusIndicator: some View {
-        if model.isConnecting || model.isAwaitingPairApproval {
-            ProgressView()
-                .controlSize(.mini)
-                .scaleEffect(0.7)
-                .frame(width: 10, height: 10)
-        } else {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-        }
+        Circle()
+            .fill(statusColor)
+            .frame(width: 6, height: 6)
     }
 
     private var statusColor: Color {
         if model.isAwaitingPairApproval { return .orange }
+        if model.isConnecting { return .blue }
         if model.isConnected { return .green }
+        // `connectionError` is the structured signal — set on socket
+        // failures and on rejected pair outcomes. Prefer it over the
+        // free-form `status` string so future status-message wording
+        // changes don't silently drop the red state. The string prefix
+        // check is kept as a fallback for paths that surface the error
+        // through `status` only (e.g. the pair-timeout transition).
+        if model.connectionError != nil { return .red }
         if model.status.hasPrefix("error") || model.status.hasPrefix("failed")
             || model.status.hasPrefix("rejected") || model.status.hasPrefix("pair timeout") {
             return .red
         }
         return .secondary
-    }
-
-    private var transportBadge: String? {
-        switch model.liveTransport {
-        case .push: return "push"
-        case .poll: return "poll"
-        case .none: return nil
-        }
     }
 }
 
@@ -560,6 +554,11 @@ private struct ConnectionActionButton: View {
 
 private struct InspectorView: View {
     let node: ViewNode?
+    /// Ancestor chain for `node`, resolved against the full hierarchy
+    /// (regardless of focus) at the parent so this view stays a pure
+    /// value-driven struct. Empty when the selection is a top-level root or
+    /// when nothing is selected.
+    let ancestors: [ViewNode]
     let compareNode: ViewNode?
     let isHoveringCompare: Bool
     @Binding var selectedNodeID: UUID?
@@ -570,25 +569,35 @@ private struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Header
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let display = node.displayName {
-                            Text(display)
-                                .font(.headline)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                            Text(node.className)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        } else {
-                            Text(node.className)
-                                .font(.headline.monospaced())
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Breadcrumb of the ancestor chain so the user can
+                        // see where the selection sits in the hierarchy and
+                        // jump to any parent without re-finding it in the
+                        // sidebar tree.
+                        BreadcrumbBar(
+                            ancestors: ancestors,
+                            onNavigate: { id in selectedNodeID = id }
+                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let display = node.displayName {
+                                Text(display)
+                                    .font(.headline)
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+                                Text(node.className)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            } else {
+                                Text(node.className)
+                                    .font(.headline.monospaced())
+                                    .textSelection(.enabled)
+                            }
+                            Text(node.ident.uuidString)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
                                 .textSelection(.enabled)
                         }
-                        Text(node.ident.uuidString)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .textSelection(.enabled)
                     }
                     .contextMenu {
                         NodeFocusMenu(nodeID: node.id)
@@ -642,6 +651,61 @@ private struct InspectorView: View {
                 message: "Select a node to inspect its attributes."
             )
         }
+    }
+}
+
+// MARK: - Breadcrumb Bar
+
+/// Horizontal trail of clickable ancestor segments shown above the inspector
+/// header. Each segment renders the ancestor's `displayName` when available
+/// (e.g. "Cancel" for a UILabel) and falls back to `shortClassName` so the
+/// chain reads `Window › NavCtrl.view › Stack › …` instead of opaque UUIDs.
+/// Tapping a segment moves the selection to that ancestor.
+///
+/// Lives in a horizontal `ScrollView` because UIKit hierarchies are deep —
+/// 8-10 segments are common for embedded SwiftUI view trees. The chevron
+/// separator is intentionally a plain "›" Text rather than an SF Symbol so
+/// it doesn't compete visually with the ancestor labels.
+private struct BreadcrumbBar: View {
+    let ancestors: [ViewNode]
+    let onNavigate: (UUID) -> Void
+
+    var body: some View {
+        if !ancestors.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(Array(ancestors.enumerated()), id: \.element.id) { index, ancestor in
+                        if index > 0 {
+                            Text(verbatim: "›")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Button {
+                            onNavigate(ancestor.id)
+                        } label: {
+                            Text(verbatim: label(for: ancestor))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+                        .help(ancestor.className)
+                        // VoiceOver would otherwise read just the visible
+                        // label (often a generic `UIView`); attaching the
+                        // full className gives screen-reader users the
+                        // same disambiguation that sighted users get from
+                        // the tooltip.
+                        .accessibilityLabel(
+                            Text(verbatim: "\(label(for: ancestor)), \(ancestor.className)")
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func label(for node: ViewNode) -> String {
+        node.displayName ?? node.shortClassName
     }
 }
 

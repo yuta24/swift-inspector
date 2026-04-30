@@ -14,6 +14,13 @@ struct HierarchyTreeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Filter sits above the tree to match Spotlight / Xcode / Finder
+            // conventions: the user types into the search field and then
+            // scans the results downward, instead of hopping back up after
+            // typing.
+            if !roots.isEmpty {
+                FilterBar(filter: $filter, roots: roots, differingIDs: differingIDs)
+            }
             List(selection: $selection) {
                 ForEach(Array(roots.enumerated()), id: \.element.id) { index, root in
                     let rootPath = [root.stablePathSegment(siblingIndex: index)]
@@ -48,10 +55,6 @@ struct HierarchyTreeView: View {
                         message: "Connect to a device and request a snapshot."
                     )
                 }
-            }
-
-            if !roots.isEmpty {
-                FilterBar(filter: $filter, roots: roots, differingIDs: differingIDs)
             }
         }
     }
@@ -206,7 +209,6 @@ private struct FilterBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Divider()
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease")
@@ -262,6 +264,10 @@ private struct FilterBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
+            // Divider sits at the bottom now that the bar lives above the
+            // tree — it visually separates the search controls from the
+            // results list below.
+            Divider()
         }
         .background(.bar)
     }
