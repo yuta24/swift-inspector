@@ -367,6 +367,7 @@ private struct DevicePickerBar: View {
                     }
                 }
                 .labelsHidden()
+                .frame(maxWidth: .infinity)
                 .disabled(model.isConnecting)
                 ConnectionActionButton()
                     .environmentObject(model)
