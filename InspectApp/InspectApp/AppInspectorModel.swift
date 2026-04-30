@@ -417,6 +417,11 @@ final class AppInspectorModel: ObservableObject {
                 // deterministic from the UI side and clears the live timer
                 // before the late `.cancelled` callback arrives.
                 self.disconnect()
+            case let .unknown(tag):
+                let reason = String(localized: "Unknown pairing outcome from a newer device (\(tag))")
+                self.connectionError = reason
+                self.status = "rejected: \(reason)"
+                self.disconnect()
             }
         }
         connection.onPairTimeout = { [weak self] in
@@ -543,6 +548,8 @@ final class AppInspectorModel: ObservableObject {
             // handshake/pairResult are consumed inside ConnectionController.
             // Outbound message cases never appear here.
             break
+        case let .unknownMessage(tag):
+            logger.warning("Model dropping unknown message tag from newer device: \(tag, privacy: .public)")
         }
     }
 

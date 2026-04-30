@@ -182,6 +182,8 @@ final class InspectClient {
                             logger.debug("Client received request/subscribe message (unexpected)")
                         case .highlightView:
                             logger.debug("Client received highlightView (unexpected)")
+                        case .unknownMessage(let tag):
+                            logger.warning("Client received unknown message tag from newer peer: \(tag, privacy: .public)")
                         }
                         self.onMessage?(message)
                     } catch {

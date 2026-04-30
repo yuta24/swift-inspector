@@ -231,6 +231,8 @@ final class ConnectionController {
             logger.info("Pair approved")
         case let .rejected(reason):
             logger.info("Pair rejected: \(reason, privacy: .public)")
+        case let .unknown(tag):
+            logger.warning("Pair outcome is unknown variant from newer device: \(tag, privacy: .public)")
         }
         onPairOutcome(outcome)
     }

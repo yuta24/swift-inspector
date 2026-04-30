@@ -285,6 +285,11 @@ final class InspectListener {
         case .requestPair, .pairResult, .handshake, .hierarchy, .error:
             logger.debug("Server ignoring message: \(String(describing: message).prefix(80), privacy: .public)")
             break
+        case .unknownMessage(let tag):
+            // A newer client sent a case this build doesn't recognize. Drop
+            // it without disturbing the receive chain so the connection
+            // survives across mixed-version pairs.
+            logger.warning("Server received unknown message tag from newer peer: \(tag, privacy: .public)")
         }
     }
 
