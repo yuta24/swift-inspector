@@ -1,6 +1,22 @@
 import SwiftUI
 import AppKit
 import InspectCore
+import UniformTypeIdentifiers
+import os.log
+
+private let contentLogger = Logger(subsystem: "swift-inspector", category: "content")
+
+/// Modal alert shown after a failed drop. Lives outside `ContentView`
+/// because the drop's async tail runs without a `View` instance.
+@MainActor
+private func presentDropAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: String(localized: "OK"))
+    alert.runModal()
+}
 
 struct ContentView: View {
     @EnvironmentObject var model: AppInspectorModel
@@ -79,6 +95,46 @@ struct ContentView: View {
                 }
             }
         }
+        // Drag a `.swiftinspector` file onto the window to open it as an
+        // offline bundle. Mirrors what File ▷ Open does — the round-trip
+        // path is identical, this is just a more discoverable surface.
+        .onDrop(of: [.fileURL], isTargeted: nil, perform: handleBundleDrop)
+    }
+
+    /// Accepts a single dropped `.swiftinspector` file URL and routes
+    /// it through `loadOfflineBundle`. The synchronous `return true`
+    /// here is unavoidable — `NSItemProvider.loadObject` is async, so
+    /// SwiftUI commits to the drop animation before the URL is known.
+    /// Wrong-extension and decode failures therefore surface as an
+    /// NSAlert in the async tail rather than via a `false` return,
+    /// otherwise the user sees the drag accepted with no feedback.
+    private func handleBundleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        guard provider.canLoadObject(ofClass: URL.self) else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url else { return }
+            Task { @MainActor in
+                guard url.pathExtension.lowercased() == BugBundle.fileExtension else {
+                    contentLogger.info("Drop rejected (wrong extension): \(url.lastPathComponent, privacy: .public)")
+                    presentDropAlert(
+                        title: String(localized: "Couldn't open dropped file"),
+                        message: String(localized: "\(url.lastPathComponent) is not a swift-inspector bundle (.swiftinspector).")
+                    )
+                    return
+                }
+                do {
+                    let bundle = try BugBundleService.read(from: url)
+                    model.loadOfflineBundle(bundle, from: url)
+                } catch {
+                    contentLogger.error("Drop-load failed: \(error.localizedDescription, privacy: .public)")
+                    presentDropAlert(
+                        title: String(localized: "Couldn't open dropped file"),
+                        message: error.localizedDescription
+                    )
+                }
+            }
+        }
+        return true
     }
 
     /// Drives `.sheet(isPresented:)` from the presenter's pending list. The
@@ -232,8 +288,16 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DevicePickerBar()
-            SidebarActionsBar()
+            // Offline mode and live-device mode are mutually exclusive
+            // (see `loadOfflineBundle` / `connect(to:)`), so swap the
+            // header in place rather than stacking — keeps the sidebar
+            // height stable across mode transitions.
+            if model.isOfflineMode {
+                OfflineBundleBar()
+            } else {
+                DevicePickerBar()
+                SidebarActionsBar()
+            }
             Divider()
             if let focused = model.focusedNode {
                 FocusBar(node: focused) {
@@ -249,6 +313,88 @@ private struct SidebarView: View {
                 differingIDs: figmaModel.differingNodeIDs
             )
         }
+    }
+}
+
+// MARK: - Offline Bundle Bar
+
+/// Sidebar header rendered while a `BugBundle` is loaded from disk.
+/// Replaces the device picker + Refresh / Live row because none of those
+/// affordances mean anything against a static archive — and showing them
+/// disabled would clutter the layout. Exposes the bundle's metadata
+/// (filename, device label, capture timestamp, optional notes) and a
+/// single "Close" exit so the user can return to live-device browsing.
+private struct OfflineBundleBar: View {
+    @EnvironmentObject var model: AppInspectorModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .foregroundStyle(.purple)
+                VStack(alignment: .leading, spacing: 1) {
+                    // File name is data, not localizable copy.
+                    Text(verbatim: model.offlineBundleURL?.lastPathComponent ?? "Bug Bundle")
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let subtitle = manifestSubtitle {
+                        Text(verbatim: subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                Spacer(minLength: 4)
+                Button {
+                    model.closeOfflineBundle()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Close bundle (⌘W)")
+            }
+            if let notes = manifestNotes {
+                Text(verbatim: notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.08))
+                    )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var manifestNotes: String? {
+        let notes = model.offlineBundleManifest?.notes?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (notes?.isEmpty == false) ? notes : nil
+    }
+
+    private var manifestSubtitle: String? {
+        guard let manifest = model.offlineBundleManifest else { return nil }
+        var parts: [String] = []
+        if let device = manifest.deviceName?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !device.isEmpty {
+            parts.append(device)
+        }
+        if let systemName = manifest.systemName,
+           let systemVersion = manifest.systemVersion {
+            parts.append("\(systemName) \(systemVersion)")
+        }
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .short
+        dateFormatter.timeStyle = .short
+        parts.append(dateFormatter.string(from: manifest.createdAt))
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 

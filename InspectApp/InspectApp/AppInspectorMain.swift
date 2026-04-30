@@ -1,5 +1,10 @@
 import SwiftUI
+import AppKit
+import InspectCore
 import Sparkle
+import os.log
+
+private let mainLogger = Logger(subsystem: "swift-inspector", category: "main")
 
 @main
 struct AppInspectorMain: App {
@@ -38,6 +43,14 @@ struct AppInspectorMain: App {
                     CheckForUpdatesView(viewModel: viewModel)
                 }
                 ReenableCrashNotificationsView(presenter: crashPresenter)
+            }
+            // File menu — the SPM build has no document-based plumbing,
+            // so there's no "New" to keep. Replace it with the bug-bundle
+            // workflow: Open / Export / Close-when-offline. Disabled
+            // states are bound to model state so the menu silently
+            // greys out at moments when the action would be a no-op.
+            CommandGroup(replacing: .newItem) {
+                BugBundleCommands(model: model)
             }
         }
 
@@ -93,6 +106,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             model?.shutdown()
         }
+    }
+}
+
+// MARK: - Bug Bundle Menu Items
+
+/// File-menu commands for the bug-bundle workflow: Open a `.swiftinspector`
+/// file (replaces "New"), Export the current snapshot, and Close the
+/// offline bundle when one is loaded. Bound directly to `AppInspectorModel`
+/// because the items' enabled state depends on connection / offline-mode
+/// transitions, and the file dialogs route their result back through the
+/// model's `loadOfflineBundle` / `currentBugBundle` helpers.
+private struct BugBundleCommands: View {
+    @ObservedObject var model: AppInspectorModel
+
+    var body: some View {
+        Button("Open Bug Bundle…") {
+            openBundle()
+        }
+        .keyboardShortcut("o", modifiers: .command)
+
+        Divider()
+
+        Button("Export Bug Bundle…") {
+            exportBundle()
+        }
+        .keyboardShortcut("e", modifiers: [.command, .shift])
+        // Enabled whenever there's a hierarchy to export, regardless of
+        // whether `roots` came from a live device or a loaded bundle.
+        // The QA-handoff loop ("open a bundle, type repro steps in the
+        // notes field, save to a new path") relies on the offline
+        // case being writable too — `currentBugBundle()` is happy with
+        // either source because it reads from `roots` directly.
+        .disabled(model.roots.isEmpty)
+
+        if model.isOfflineMode {
+            Button("Close Bug Bundle") {
+                model.closeOfflineBundle()
+            }
+            .keyboardShortcut("w", modifiers: .command)
+        }
+    }
+
+    private func exportBundle() {
+        guard let bundle = model.currentBugBundle() else { return }
+        let defaultName = BugBundleService.defaultFileName(deviceName: model.lastHandshake?.deviceName)
+        do {
+            if let url = try BugBundleService.presentSavePanel(for: bundle, defaultName: defaultName) {
+                // Reveal in Finder so the user immediately sees where
+                // the bundle ended up — most exports are followed by
+                // "drag this into Slack/Jira" and pre-selecting the
+                // file shaves a step.
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        } catch {
+            mainLogger.error("Bug-bundle export failed: \(error.localizedDescription, privacy: .public)")
+            presentError(title: String(localized: "Couldn't export bundle"), error: error)
+        }
+    }
+
+    private func openBundle() {
+        do {
+            if let result = try BugBundleService.presentOpenPanel() {
+                model.loadOfflineBundle(result.bundle, from: result.url)
+            }
+        } catch {
+            mainLogger.error("Bug-bundle open failed: \(error.localizedDescription, privacy: .public)")
+            presentError(title: String(localized: "Couldn't open bundle"), error: error)
+        }
+    }
+
+    private func presentError(title: String, error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: String(localized: "OK"))
+        alert.runModal()
     }
 }
 

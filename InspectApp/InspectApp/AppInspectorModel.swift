@@ -59,6 +59,25 @@ final class AppInspectorModel: ObservableObject {
     /// users can tell a click was registered.
     @Published var isConnecting: Bool = false
     @Published var connectedDeviceName: String = ""
+    /// Most recent server handshake. Cleared on disconnect. Used by the
+    /// bug-bundle exporter to attach device metadata to a saved snapshot
+    /// without inventing a second source of truth alongside
+    /// `connectedDeviceName` (which is a display string, not structured
+    /// data). Nil when no live connection has produced a handshake yet.
+    @Published private(set) var lastHandshake: InspectMessage.Handshake?
+    /// True while the inspector is showing a `BugBundle` loaded from
+    /// disk rather than a live device. Mutually exclusive with
+    /// `isConnected` — entering offline mode tears down any live
+    /// connection first, and any `connect(to:)` exits offline mode.
+    @Published private(set) var isOfflineMode: Bool = false
+    /// On-disk URL of the bundle currently being viewed in offline
+    /// mode. Surfaced in the sidebar so the user can tell which file
+    /// they're looking at.
+    @Published private(set) var offlineBundleURL: URL?
+    /// Manifest of the bundle currently being viewed in offline mode.
+    /// Provides the device label / notes / created-at the offline
+    /// banner displays without re-reading the file.
+    @Published private(set) var offlineBundleManifest: BugBundle.Manifest?
     /// True between sending `requestPair` and receiving the device's
     /// `pairResult`. The UI surfaces a "デバイス側で承認してください…" banner
     /// during this window so the user knows to look at the device, not the
@@ -173,6 +192,13 @@ final class AppInspectorModel: ObservableObject {
     }
 
     func connect(to endpoint: InspectEndpoint) {
+        // Connecting to a live device implicitly leaves offline-viewer
+        // mode — the two cannot share the canvas. Done before clearing
+        // `connectionError` so closeOfflineBundle's status reset doesn't
+        // overwrite the "connecting…" label we set below.
+        if isOfflineMode {
+            closeOfflineBundle()
+        }
         connectionError = nil
         connection.connect(to: endpoint)
         status = "connecting to \(endpoint.name)"
@@ -286,6 +312,7 @@ final class AppInspectorModel: ObservableObject {
         }
         connection.onHandshake = { [weak self] handshake, label in
             guard let self else { return }
+            self.lastHandshake = handshake
             self.connectedDeviceName = label
             // Pre-v4 servers don't pair: the handshake itself is the green
             // light to start fetching hierarchies. v4+ peers wait for
@@ -355,6 +382,7 @@ final class AppInspectorModel: ObservableObject {
         inflightSentAt = nil
         connectedEndpointID = nil
         connectedDeviceName = ""
+        lastHandshake = nil
         markConnected(endpointID: nil)
         resetCapturedState()
     }
@@ -475,5 +503,92 @@ final class AppInspectorModel: ObservableObject {
         }
         measurementReferenceID = preservedReferenceID
         measurementHoverID = preservedHoverID
+    }
+
+    // MARK: - Bug Bundle (export / offline viewer)
+
+    /// Builds a `BugBundle` from the currently-displayed hierarchy plus
+    /// the last server handshake. Returns `nil` when there's nothing
+    /// worth exporting (no captured roots) so the caller can keep its
+    /// menu item disabled. The full `roots` are exported, not
+    /// `displayRoots`, so a bundle saved while focused on a subtree
+    /// still carries the rest of the tree for later context.
+    func currentBugBundle(notes: String? = nil) -> BugBundle? {
+        guard !roots.isEmpty else { return nil }
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+
+        let manifest: BugBundle.Manifest
+        if let existing = offlineBundleManifest {
+            // Re-exporting a loaded bundle (the QA "type repro steps and
+            // save to a new path" case): preserve the original capture
+            // metadata. `createdAt` is *capture* time, not save time, so
+            // it must survive the round-trip; same for the device fields.
+            // `notes` overrides only when the caller passes a value, so
+            // default re-export keeps whatever was already in the manifest.
+            manifest = BugBundle.Manifest(
+                schemaVersion: existing.schemaVersion,
+                createdAt: existing.createdAt,
+                exporterAppVersion: appVersion ?? existing.exporterAppVersion,
+                notes: notes ?? existing.notes,
+                deviceName: existing.deviceName,
+                systemName: existing.systemName,
+                systemVersion: existing.systemVersion,
+                protocolVersion: existing.protocolVersion
+            )
+        } else {
+            manifest = BugBundle.Manifest(
+                exporterAppVersion: appVersion,
+                notes: notes,
+                deviceName: lastHandshake?.deviceName,
+                systemName: lastHandshake?.systemName,
+                systemVersion: lastHandshake?.systemVersion,
+                protocolVersion: lastHandshake?.protocolVersion
+            )
+        }
+        return BugBundle(manifest: manifest, roots: roots)
+    }
+
+    /// Replaces the live hierarchy with one read from a `.swiftinspector`
+    /// file. Drops any current connection first so the canvas isn't a
+    /// half-live, half-archived mix. Reuses
+    /// `applyHierarchyPreservingSelection` so selection/measurement
+    /// remap behaves the same as a live update.
+    func loadOfflineBundle(_ bundle: BugBundle, from url: URL) {
+        if isConnected {
+            disconnect()
+        }
+        isOfflineMode = true
+        offlineBundleURL = url
+        offlineBundleManifest = bundle.manifest
+
+        applyHierarchyPreservingSelection(newRoots: bundle.roots)
+        if selectedNodeID == nil {
+            selectedNodeID = bundle.roots.first?.id
+        }
+
+        let label = bundle.manifest.deviceName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmptyOrNil
+            ?? url.deletingPathExtension().lastPathComponent
+        status = String(localized: "offline: \(label)")
+    }
+
+    /// Exits offline-viewer mode and returns to the idle "browsing for
+    /// devices" state. Safe to call when not in offline mode (no-op).
+    func closeOfflineBundle() {
+        guard isOfflineMode else { return }
+        isOfflineMode = false
+        offlineBundleURL = nil
+        offlineBundleManifest = nil
+        resetCapturedState()
+        status = "browsing"
+    }
+}
+
+private extension String {
+    /// Returns `nil` when the receiver is empty so callers can chain
+    /// `?? fallback` without an extra `isEmpty` check at the call site.
+    var nonEmptyOrNil: String? {
+        isEmpty ? nil : self
     }
 }
