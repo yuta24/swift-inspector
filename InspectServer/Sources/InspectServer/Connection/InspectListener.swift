@@ -88,6 +88,10 @@ final class InspectListener {
                 #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
+                    // Drop the highlight overlay too — the client that asked
+                    // for it is gone, and its `.highlightView(nil)` farewell
+                    // can race the cancel and never arrive.
+                    HighlightOverlay.clear()
                 }
                 #endif
             case .cancelled:
@@ -96,6 +100,7 @@ final class InspectListener {
                 #if (DEBUG || SWIFT_INSPECTOR_ENABLED) && canImport(UIKit)
                 Task { @MainActor [weak self] in
                     self?.removeSubscriber(connection)
+                    HighlightOverlay.clear()
                 }
                 #endif
             default:
