@@ -37,7 +37,10 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-14
+    # `macos-15` is required because the macOS client's package graph
+    # transitively resolves DeviceKit 5.8.0, whose manifest needs a Swift
+    # toolchain newer than the Xcode 15.4 default on `macos-14`.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
