@@ -41,6 +41,27 @@ final class ManualEndpointTests: XCTestCase {
         XCTAssertTrue(model.manualEndpoints.isEmpty)
     }
 
+    func test_addManualEndpoint_ipv6_bareLiteralIsBracketedForDisplay() {
+        let model = AppInspectorModel()
+        let id = model.addManualEndpoint(host: "fe80::1", port: 8765)
+        XCTAssertEqual(id, "manual:[fe80::1]:8765")
+        XCTAssertEqual(model.manualEndpoints.first?.name, "[fe80::1]:8765")
+    }
+
+    func test_addManualEndpoint_ipv6_bracketedInputIsDedupedWithBare() {
+        let model = AppInspectorModel()
+        let bare = model.addManualEndpoint(host: "::1", port: 8765)
+        let bracketed = model.addManualEndpoint(host: "[::1]", port: 8765)
+        XCTAssertEqual(bare, bracketed)
+        XCTAssertEqual(model.manualEndpoints.count, 1)
+    }
+
+    func test_addManualEndpoint_rejectsBracketsWithEmptyContent() {
+        let model = AppInspectorModel()
+        XCTAssertNil(model.addManualEndpoint(host: "[]", port: 8765))
+        XCTAssertTrue(model.manualEndpoints.isEmpty)
+    }
+
     func test_removeManualEndpoint_dropsByID() {
         let model = AppInspectorModel()
         let id = model.addManualEndpoint(host: "192.168.1.42", port: 8765)

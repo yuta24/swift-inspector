@@ -82,12 +82,23 @@ final class ConnectionController {
     func connect(to endpoint: InspectEndpoint) {
         disconnect()
         let client = InspectClient()
-        client.onStatus = { [weak self] message in
-            Task { @MainActor in self?.onStatus(message) }
-        }
-        client.onConnected = { [weak self] in
+        // Each callback re-checks `self.client === client` after hopping
+        // to MainActor. NWConnection callbacks fire on the client's
+        // private queue, and the `Task { @MainActor }` hop can re-order
+        // arbitrarily relative to a subsequent `disconnect()` /
+        // `connect()` issued from the UI. Without this identity guard a
+        // late `.cancelled` (or a final `.hierarchy`) from the *previous*
+        // client would clobber the new connection's freshly-set state
+        // (e.g. the new spinner, the new handshake-derived label).
+        client.onStatus = { [weak self, weak client] message in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let client, self.client === client else { return }
+                self.onStatus(message)
+            }
+        }
+        client.onConnected = { [weak self, weak client] in
+            Task { @MainActor in
+                guard let self, let client, self.client === client else { return }
                 self.onConnectingChanged(false)
                 self.onConnected(endpoint)
                 // Don't request the hierarchy yet — we wait for the server's
@@ -95,22 +106,26 @@ final class ConnectionController {
                 // (protocol >= 4) or skip it (older servers).
             }
         }
-        client.onFailed = { [weak self] error in
+        client.onFailed = { [weak self, weak client] error in
             Task { @MainActor in
-                self?.onConnectionError(error.localizedDescription)
+                guard let self, let client, self.client === client else { return }
+                self.onConnectionError(error.localizedDescription)
             }
         }
-        client.onDisconnected = { [weak self] in
+        client.onDisconnected = { [weak self, weak client] in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, let client, self.client === client else { return }
                 self.serverProtocolVersion = nil
                 self.onConnectingChanged(false)
                 self.onAwaitingPairChanged(false)
                 self.onDisconnected()
             }
         }
-        client.onMessage = { [weak self] message in
-            Task { @MainActor in self?.handle(message) }
+        client.onMessage = { [weak self, weak client] message in
+            Task { @MainActor in
+                guard let self, let client, self.client === client else { return }
+                self.handle(message)
+            }
         }
         self.client = client
         onConnectingChanged(true)

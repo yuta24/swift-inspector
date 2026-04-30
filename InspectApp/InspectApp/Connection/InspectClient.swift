@@ -19,6 +19,13 @@ final class InspectClient {
     private let queue = DispatchQueue(label: "swift-inspector.client")
     private let serializer: MessageSerializer = JSONMessageSerializer()
     private var connection: NWConnection?
+    /// Latched the first time a failure path fires (either from a
+    /// `receive` completion error or from the NWConnection's
+    /// `stateUpdateHandler` transitioning to `.failed`). Subsequent
+    /// failure paths skip the user-visible callbacks so callers don't
+    /// see `onFailed` and `onDisconnected` fire twice for one drop. All
+    /// access on `queue`.
+    private var hasFailed: Bool = false
 
     func connect(to endpoint: NWEndpoint) {
         disconnect()
@@ -38,13 +45,22 @@ final class InspectClient {
                 self.receiveNext()
             case let .failed(error):
                 logger.error("Client connection failed: \(error.localizedDescription, privacy: .public)")
-                self.onStatus?("failed: \(error.localizedDescription)")
-                self.onFailed?(error)
-                self.onDisconnected?()
+                if !self.hasFailed {
+                    self.hasFailed = true
+                    self.onStatus?("failed: \(error.localizedDescription)")
+                    self.onFailed?(error)
+                    self.onDisconnected?()
+                }
             case .cancelled:
                 logger.info("Client connection cancelled")
-                self.onStatus?("disconnected")
-                self.onDisconnected?()
+                // Skip the disconnected status when we already announced a
+                // failure for this connection — the model would otherwise
+                // overwrite the "failed" banner with a generic
+                // "disconnected" right after.
+                if !self.hasFailed {
+                    self.onStatus?("disconnected")
+                    self.onDisconnected?()
+                }
             case let .waiting(error):
                 logger.warning("Client connection waiting: \(error.localizedDescription, privacy: .public)")
                 self.onStatus?("waiting: \(error.localizedDescription)")
@@ -59,6 +75,7 @@ final class InspectClient {
     func disconnect() {
         connection?.cancel()
         connection = nil
+        hasFailed = false
     }
 
     func send(_ message: InspectMessage) {
@@ -81,6 +98,28 @@ final class InspectClient {
         }
     }
 
+    /// Drives a deterministic disconnect when an error fires inside a
+    /// `receive` completion. NWConnection's `stateUpdateHandler` does not
+    /// always transition to `.failed` for receive-side errors (it sometimes
+    /// only emits `.cancelled`, especially after a TCP RST), which would
+    /// leave callers waiting forever on `onFailed` and never showing a
+    /// Retry affordance. Mirror the `.failed` semantics here so the model
+    /// gets the same signal regardless of which layer noticed the drop.
+    /// Idempotent — `hasFailed` latches so a stateUpdateHandler `.failed`
+    /// arriving alongside a receive error doesn't double-fire `onFailed`
+    /// / `onDisconnected`.
+    private func failConnection(_ connection: NWConnection, error: Error) {
+        guard !hasFailed else {
+            connection.cancel()
+            return
+        }
+        hasFailed = true
+        onStatus?("failed: \(error.localizedDescription)")
+        onFailed?(error)
+        onDisconnected?()
+        connection.cancel()
+    }
+
     private func receiveNext() {
         guard let connection else {
             logger.warning("Client receiveNext called with no connection")
@@ -94,7 +133,7 @@ final class InspectClient {
             guard let self, let connection = self.connection else { return }
             if let error {
                 logger.error("Client header receive error: \(error.localizedDescription, privacy: .public)")
-                self.onStatus?("receive error: \(error.localizedDescription)")
+                self.failConnection(connection, error: error)
                 return
             }
             guard let header, let length = Framing.parseLength(header) else {
@@ -106,10 +145,16 @@ final class InspectClient {
             connection.receive(
                 minimumIncompleteLength: length,
                 maximumLength: length
-            ) { payload, _, isComplete, error in
+            ) { [weak self] payload, _, isComplete, error in
+                // Re-do the weak unwrap explicitly — without `[weak self]`
+                // here NWConnection holds this completion, which would
+                // strong-capture the outer `self` (rebound non-optional
+                // by `guard let self`) and keep `InspectClient` alive
+                // even after `disconnect()` clears the `connection` ref.
+                guard let self else { return }
                 if let error {
                     logger.error("Client payload receive error: \(error.localizedDescription, privacy: .public)")
-                    self.onStatus?("receive error: \(error.localizedDescription)")
+                    self.failConnection(connection, error: error)
                     return
                 }
                 if let payload, !payload.isEmpty {

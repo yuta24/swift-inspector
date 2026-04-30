@@ -44,7 +44,10 @@ final class HierarchyChangeMonitor {
                 self?.tick()
             }
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .defaultMode)
+        // `commonModes` already covers `defaultMode` (and tracking,
+        // modal, etc.) — adding both modes registers the observer twice
+        // for default mode and the tick fires twice per beforeWaiting.
+        // Keep just the common-mode registration.
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         self.observer = observer
         logger.info("HierarchyChangeMonitor started (minInterval=\(minIntervalSec, privacy: .public)s)")
@@ -52,7 +55,6 @@ final class HierarchyChangeMonitor {
 
     func stop() {
         guard let observer else { return }
-        CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .defaultMode)
         CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
         self.observer = nil
         self.onChanged = nil
@@ -64,12 +66,18 @@ final class HierarchyChangeMonitor {
         if hasFiredInitial, now - lastFireAt < minIntervalSec {
             return
         }
+        // Stamp `lastFireAt` *before* walking the tree so an idle but
+        // busy run loop (UIScrollView decel, animation timers) doesn't
+        // keep recomputing a thousand-node fingerprint every wait when
+        // nothing actually changed. With this in place the fingerprint
+        // walk is bounded to once per `minIntervalSec`, regardless of
+        // whether `onChanged` ends up firing.
+        lastFireAt = now
         let fp = computeFingerprint()
         if hasFiredInitial, fp == lastFingerprint {
             return
         }
         lastFingerprint = fp
-        lastFireAt = now
         hasFiredInitial = true
         onChanged?()
     }

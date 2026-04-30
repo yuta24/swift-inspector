@@ -231,7 +231,22 @@ final class AppInspectorModel: ObservableObject {
               let nwPort = NWEndpoint.Port(rawValue: port) else {
             return nil
         }
-        let id = "manual:\(trimmedHost):\(port)"
+        // Strip the surrounding `[]` from a bracketed IPv6 literal
+        // (`[fe80::1]`) before handing the bare address to
+        // `NWEndpoint.Host`, which expects the un-bracketed form.
+        // Display-side, format IPv6 with brackets so `host:port` stays
+        // unambiguous (`[::1]:8765` instead of the visually-broken
+        // `::1:8765`). IPv4 / hostnames keep their existing display.
+        let bareHost: String = {
+            if trimmedHost.hasPrefix("["), trimmedHost.hasSuffix("]") {
+                return String(trimmedHost.dropFirst().dropLast())
+            }
+            return trimmedHost
+        }()
+        guard !bareHost.isEmpty else { return nil }
+        let isIPv6 = bareHost.contains(":")
+        let displayHost = isIPv6 ? "[\(bareHost)]" : bareHost
+        let id = "manual:\(displayHost):\(port)"
         // Idempotent re-add: typing the same host:port twice should
         // surface the existing entry, not duplicate it.
         if let existing = manualEndpoints.first(where: { $0.id == id }) {
@@ -239,8 +254,8 @@ final class AppInspectorModel: ObservableObject {
         }
         let endpoint = InspectEndpoint(
             id: id,
-            name: "\(trimmedHost):\(port)",
-            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(trimmedHost), port: nwPort)
+            name: "\(displayHost):\(port)",
+            endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(bareHost), port: nwPort)
         )
         manualEndpoints.append(endpoint)
         return endpoint.id

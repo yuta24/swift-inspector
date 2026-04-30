@@ -8,6 +8,15 @@ private let logger = Logger(subsystem: "swift-inspector", category: "crash-repor
 /// apps without any special entitlement — AppInspector ships unsandboxed
 /// so this works directly.
 enum CrashReportScanner {
+    /// Hard cap on how much of a single `.ips`/`.crash` file we read
+    /// into memory. Real-world Apple diagnostic reports are ~50–500 KB,
+    /// but pathological cases (spindump-style, repeat-fault) can exceed
+    /// 5 MB. Reading the whole file then handing it to a SwiftUI `Text`
+    /// view in the launch sheet would freeze AppInspector startup for
+    /// seconds. 512 KB keeps the typical report fully intact while
+    /// bounding the worst case.
+    static let maxRawBytes: Int = 512 * 1024
+
     /// Returns reports for `processName` (and matching `bundleID` when
     /// present in the report header) modified after `since`, sorted most
     /// recent first. `bundleID` filtering avoids surfacing unrelated
@@ -59,7 +68,7 @@ enum CrashReportScanner {
     /// files are plain text — we keep them for `rawContents` but skip
     /// header/body parsing.
     private static func parse(url: URL, fallbackDate: Date, expectedBundleID: String?) -> CrashReport? {
-        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let raw = readCappedUTF8(at: url) else { return nil }
 
         var header: [String: Any] = [:]
         var body: [String: Any] = [:]
@@ -102,6 +111,34 @@ enum CrashReportScanner {
             crashedThreadIndex: body["faultingThread"] as? Int,
             rawContents: raw
         )
+    }
+
+    /// Reads up to `maxRawBytes` from a diagnostic report. For oversized
+    /// files we keep the head (which contains the JSON header + the
+    /// crashed-thread frames the user cares about) and append a marker
+    /// so the issue body isn't silently truncated. The header parse
+    /// below is robust to a body that's been cut mid-line because it
+    /// only inspects the first newline-delimited JSON object.
+    private static func readCappedUTF8(at url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maxRawBytes) else { return nil }
+        // Truncation detection by *bytes read*, not by `.fileSizeKey`.
+        // The latter falls back to `data.count` on failure, which would
+        // silently misreport an oversized file as fully-loaded — exactly
+        // the case where we most need the marker. False-positive at
+        // exactly `maxRawBytes` is acceptable; the user just sees the
+        // marker on a file that happened to land on the boundary.
+        let wasTruncated = data.count >= maxRawBytes
+        let lossyText: String = String(data: data, encoding: .utf8)
+            // Fall back to lossy decode rather than dropping the report
+            // entirely — we'd rather surface a partially-mangled payload
+            // (UTF-8 multi-byte sequence cut at the cap boundary, etc.)
+            // than swallow a real crash on the first launch after one.
+            ?? String(decoding: data, as: UTF8.self)
+        guard wasTruncated else { return lossyText }
+        let originalKB = ((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? data.count) / 1024
+        return lossyText + "\n\n… (truncated at \(maxRawBytes / 1024) KB; original \(originalKB) KB)"
     }
 
     private static func jsonObject(from string: String) -> [String: Any]? {
