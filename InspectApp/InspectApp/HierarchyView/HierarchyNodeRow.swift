@@ -85,12 +85,21 @@ struct HierarchyNodeRow: View {
             let textHighlight = !isDimmed && !filter.text.isEmpty
                 && accID.localizedCaseInsensitiveContains(filter.text)
             Text(accID)
-                .font(.caption2)
-                .padding(.horizontal, 4)
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 6)
                 .padding(.vertical, 1)
-                .background(textHighlight ? Color.yellow.opacity(0.3) : Color.blue.opacity(0.15))
-                .cornerRadius(3)
-                .foregroundStyle(textHighlight ? .primary : .secondary)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(textHighlight ? Color.yellow.opacity(0.35) : Color.accentColor.opacity(0.14))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            textHighlight ? Color.yellow.opacity(0.45) : Color.accentColor.opacity(0.22),
+                            lineWidth: 0.5
+                        )
+                )
+                .foregroundStyle(textHighlight ? .primary : Color.accentColor)
                 .lineLimit(1)
                 .help("accessibilityIdentifier: \(accID)")
         }

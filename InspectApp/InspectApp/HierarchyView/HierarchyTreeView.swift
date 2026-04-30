@@ -209,11 +209,12 @@ private struct FilterBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 HStack(spacing: 6) {
-                    Image(systemName: "line.3.horizontal.decrease")
+                    Image(systemName: "magnifyingglass")
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.secondary)
-                        .font(.caption)
+                        .font(.caption.weight(.semibold))
                     TextField("Filter…", text: $filter.text)
                         .textFieldStyle(.plain)
                         .font(.callout)
@@ -222,6 +223,7 @@ private struct FilterBar: View {
                             filter.text = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
+                                .symbolRenderingMode(.hierarchical)
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -231,6 +233,16 @@ private struct FilterBar: View {
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                )
 
                 HStack(spacing: 4) {
                     FilterToggle(
@@ -310,12 +322,27 @@ private struct FilterToggle: View {
             isOn.toggle()
         } label: {
             Label(title, systemImage: systemImage)
-                .font(.caption2)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(isOn ? Color.accentColor.opacity(0.2) : Color.clear)
-                .cornerRadius(4)
-                .foregroundStyle(isOn ? .primary : .secondary)
+                .symbolRenderingMode(.hierarchical)
+                // Fixed weight on both sides — toggling weight changes
+                // the rendered glyph metrics, which shifts the Capsule
+                // width and bumps the row layout sideways every time
+                // a filter flips. The fill/stroke/foreground tint is
+                // enough signal for on/off.
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isOn ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.04))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            isOn ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.05),
+                            lineWidth: 0.5
+                        )
+                )
+                .foregroundStyle(isOn ? Color.accentColor : .secondary)
         }
         .buttonStyle(.plain)
         .help(title)

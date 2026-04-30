@@ -208,16 +208,18 @@ private struct LiveToolbarControl: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: model.isLiveMode ? "pause.circle.fill" : "play.circle")
+                    .symbolRenderingMode(.hierarchical)
                 Text(model.isLiveMode ? "Pause Live" : "Live")
                 if let badge = transportBadge {
                     Text(badge)
-                        .font(.caption2.monospaced())
-                        .padding(.horizontal, 4)
+                        .font(.caption2.monospaced().weight(.semibold))
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.secondary.opacity(0.15))
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.08))
                         )
+                        .foregroundStyle(.secondary)
                 }
             }
         } primaryAction: {
@@ -328,9 +330,11 @@ private struct OfflineBundleBar: View {
     @EnvironmentObject var model: AppInspectorModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "doc.text.magnifyingglass")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(.purple)
                 VStack(alignment: .leading, spacing: 1) {
                     // File name is data, not localizable copy.
@@ -362,10 +366,15 @@ private struct OfflineBundleBar: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.secondary.opacity(0.08))
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
                     )
             }
         }
@@ -453,16 +462,19 @@ private struct FocusBar: View {
     let onClear: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: "scope")
-                .font(.caption)
+                .symbolRenderingMode(.hierarchical)
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tint)
             Text("Focused on")
-                .font(.caption)
+                .font(.system(size: 10, weight: .semibold))
+                .textCase(.uppercase)
+                .tracking(0.6)
                 .foregroundStyle(.secondary)
             if let display = node.displayName {
                 Text(verbatim: display)
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(node.className)
@@ -478,6 +490,7 @@ private struct FocusBar: View {
                 onClear()
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
@@ -488,8 +501,18 @@ private struct FocusBar: View {
             .help("Exit focus (⌘⇧F)")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.accentColor.opacity(0.12))
+        .padding(.vertical, 8)
+        .background(
+            // Soft accent wash + a single hairline divider stripe on the
+            // leading edge — reads as a tag that can be peeled off without
+            // looking like a heavy banner that takes over the sidebar.
+            ZStack(alignment: .leading) {
+                Color.accentColor.opacity(0.10)
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: 2)
+            }
+        )
     }
 }
 
@@ -502,8 +525,10 @@ private struct DevicePickerBar: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: "iphone")
-                    .foregroundStyle(model.isConnected ? .blue : .secondary)
+                Image(systemName: "iphone.gen3")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(model.isConnected ? Color.accentColor : .secondary)
                 Picker("Device", selection: selectedBinding) {
                     Text("No Device")
                         .tag(nil as String?)
@@ -572,11 +597,18 @@ private struct DevicePickerBar: View {
     /// Static colored dot — the toolbar's `ActivityIndicator` already shows
     /// a spinner during connect / awaiting-pair / inflight, so keeping the
     /// sidebar indicator stateful here was double-signalling. The color is
-    /// enough state info next to the status text.
+    /// enough state info next to the status text. A subtle ring outside the
+    /// fill gives the dot a tactile look without animating.
     private var statusIndicator: some View {
-        Circle()
-            .fill(statusColor)
-            .frame(width: 6, height: 6)
+        ZStack {
+            Circle()
+                .stroke(statusColor.opacity(0.25), lineWidth: 2)
+                .frame(width: 11, height: 11)
+            Circle()
+                .fill(statusColor)
+                .frame(width: 7, height: 7)
+        }
+        .frame(width: 11, height: 11)
     }
 
     private var statusColor: Color {
@@ -747,7 +779,7 @@ private struct InspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Header
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 10) {
                         // Breadcrumb of the ancestor chain so the user can
                         // see where the selection sits in the hierarchy and
                         // jump to any parent without re-finding it in the
@@ -756,25 +788,30 @@ private struct InspectorView: View {
                             ancestors: ancestors,
                             onNavigate: { id in selectedNodeID = id }
                         )
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 6) {
                             if let display = node.displayName {
                                 Text(display)
-                                    .font(.headline)
+                                    .font(.system(size: 17, weight: .semibold))
                                     .lineLimit(2)
                                     .textSelection(.enabled)
-                                Text(node.className)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
+                                ClassNamePill(name: node.className)
                             } else {
                                 Text(node.className)
-                                    .font(.headline.monospaced())
+                                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
                                     .textSelection(.enabled)
                             }
-                            Text(node.ident.uuidString)
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.tertiary)
-                                .textSelection(.enabled)
+                            HStack(spacing: 4) {
+                                Text("ID")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .tracking(0.6)
+                                    .foregroundStyle(.tertiary)
+                                Text(node.ident.uuidString)
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                                    .textSelection(.enabled)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
                         }
                     }
                     .contextMenu {
@@ -832,6 +869,36 @@ private struct InspectorView: View {
     }
 }
 
+// MARK: - Class Name Pill
+
+/// Capsule presentation of a runtime class name. Used in the inspector
+/// header so the type sits visually distinct from the (often longer)
+/// `displayName` title above it. The fill is a subtle tinted background;
+/// the glyph is monospaced so identifiers like `_UISystemBackgroundView`
+/// stay readable at any zoom.
+private struct ClassNamePill: View {
+    let name: String
+
+    var body: some View {
+        Text(verbatim: name)
+            .font(.system(.caption, design: .monospaced).weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
+            )
+            .textSelection(.enabled)
+            .lineLimit(1)
+            .truncationMode(.middle)
+    }
+}
+
 // MARK: - Breadcrumb Bar
 
 /// Horizontal trail of clickable ancestor segments shown above the inspector
@@ -842,8 +909,9 @@ private struct InspectorView: View {
 ///
 /// Lives in a horizontal `ScrollView` because UIKit hierarchies are deep —
 /// 8-10 segments are common for embedded SwiftUI view trees. The chevron
-/// separator is intentionally a plain "›" Text rather than an SF Symbol so
-/// it doesn't compete visually with the ancestor labels.
+/// separator uses a small `chevron.right` SF Symbol at semibold weight so
+/// it reads as a chip-style trail without competing with the ancestor
+/// labels.
 private struct BreadcrumbBar: View {
     let ancestors: [ViewNode]
     let onNavigate: (UUID) -> Void
@@ -851,20 +919,30 @@ private struct BreadcrumbBar: View {
     var body: some View {
         if !ancestors.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     ForEach(Array(ancestors.enumerated()), id: \.element.id) { index, ancestor in
                         if index > 0 {
-                            Text(verbatim: "›")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(.quaternary)
                         }
                         Button {
                             onNavigate(ancestor.id)
                         } label: {
                             Text(verbatim: label(for: ancestor))
-                                .font(.caption2)
+                                .font(.caption2.weight(.medium))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color.primary.opacity(0.04))
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                                )
                         }
                         .buttonStyle(.plain)
                         .help(ancestor.className)
@@ -904,8 +982,12 @@ private struct ScreenshotSection: View {
                             .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 200)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                            .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
                     } else {
                         Text("No image")
                             .font(.caption)
@@ -986,12 +1068,18 @@ private struct FigmaDiffSection: View {
                 .truncationMode(.middle)
             Spacer(minLength: 0)
             Text(verbatim: confidenceLabel(match))
-                .font(.caption2)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(confidenceColor(match.confidence).opacity(0.18))
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(confidenceColor(match.confidence).opacity(0.16))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(confidenceColor(match.confidence).opacity(0.30), lineWidth: 0.5)
+                )
                 .foregroundStyle(confidenceColor(match.confidence))
-                .clipShape(Capsule())
         }
     }
 
@@ -1041,9 +1129,15 @@ private struct FigmaDiffSection: View {
             case .unavailable: return .secondary
             }
         }()
-        Circle()
-            .fill(color)
-            .frame(width: 6, height: 6)
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.22), lineWidth: 2)
+                .frame(width: 11, height: 11)
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+        }
+        .frame(width: 11, height: 11)
     }
 }
 
@@ -1695,22 +1789,33 @@ private struct TypographySection: View {
         }
     }
 
+    /// Stacked single-column rows. The previous 4-column Grid put two
+    /// label/value pairs on one line, which collapsed into character-by-
+    /// character vertical wrap once the inspector hit its 280pt minimum
+    /// width — neither pair had room for `PropertyLabel`'s 100pt min
+    /// plus a callout-monospaced value. The single-column pattern
+    /// matches the rest of the inspector sections (Appearance, Layer,
+    /// Interaction) and stays readable at any column width.
     @ViewBuilder
     private var metricsGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            GridRow {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
                 PropertyLabel("size")
-                PropertyValue("\(formatPt(typography.pointSize))")
-                if let name = typography.weightName {
+                PropertyValue(formatPt(typography.pointSize))
+            }
+            if let name = typography.weightName {
+                HStack(spacing: 8) {
                     PropertyLabel("weight")
                     PropertyValue(name)
-                } else if let weight = typography.weight {
+                }
+            } else if let weight = typography.weight {
+                HStack(spacing: 8) {
                     PropertyLabel("weight")
                     PropertyValue(String(format: "%.2f", weight))
                 }
             }
             if let lineHeight = typography.lineHeight, lineHeight > 0 {
-                GridRow {
+                HStack(spacing: 8) {
                     PropertyLabel("lineHeight")
                     PropertyValue(formatPt(lineHeight))
                 }
@@ -1720,12 +1825,17 @@ private struct TypographySection: View {
 
     private func traitBadge(_ label: String, italic: Bool) -> some View {
         Text(label)
-            .font(italic ? .caption2.italic() : .caption2)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
+            .font((italic ? Font.caption2.italic() : Font.caption2).weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .foregroundStyle(.secondary)
             .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.secondary.opacity(0.15))
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
             )
     }
 
@@ -1827,32 +1937,57 @@ private struct CollapsibleSection<Content: View>: View {
     }
 
     var body: some View {
-        GroupBox {
-            // GroupBox always reserves room for content; emitting an
-            // EmptyView when collapsed lets the box shrink to just its
-            // label height instead of leaving a hollow padding band.
-            if isExpanded {
-                content()
-            }
-        } label: {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(.easeInOut(duration: 0.18)) {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Label(title, systemImage: icon)
-                        .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .symbolRenderingMode(.hierarchical)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tint)
+                        .frame(width: 14, alignment: .center)
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .textCase(.uppercase)
+                        .tracking(0.6)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.tertiary)
+                        // Single rotated chevron (vs. swapping `.down`/`.right`)
+                        // animates smoothly with the expand/collapse.
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
                 }
                 .contentShape(Rectangle())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
+
+            if isExpanded {
+                Divider()
+                    .opacity(0.5)
+                content()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
         }
+        .background(
+            // `Color.primary.opacity(...)` flips white/black with the
+            // current appearance, so the card stays visible in both
+            // light and dark modes. `.textBackgroundColor` collapses to
+            // an almost-transparent dark fill in dark mode.
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
     }
 }
 
