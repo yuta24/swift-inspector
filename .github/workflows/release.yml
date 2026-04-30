@@ -48,8 +48,18 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           BUILD_NUM=$(git rev-list --count HEAD)
+          # Any SemVer pre-release suffix (v0.1.0-rc1, v0.2.0-beta.3, …)
+          # is treated as a prerelease: the GitHub Release is marked as
+          # such, and the appcast.xml publish step is skipped so installed
+          # production clients don't auto-update to a candidate build.
+          if [[ "$VERSION" == *-* ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build_num=$BUILD_NUM" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Import Developer ID certificate
         env:
@@ -217,8 +227,12 @@ jobs:
         with:
           files: build/AppInspector-${{ steps.version.outputs.version }}.zip
           generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
 
       - name: Publish appcast.xml to gh-pages
+        # Skipped on pre-release tags so production clients (which point
+        # at this appcast) don't auto-update to a candidate build.
+        if: steps.version.outputs.is_prerelease == 'false'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUM: ${{ steps.version.outputs.build_num }}
