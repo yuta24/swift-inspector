@@ -40,10 +40,13 @@ struct SceneViewContainer: View {
     @Binding var measurementReferenceID: UUID?
     @Binding var measurementHoverID: UUID?
     @AppStorage("canvasMode") private var mode: CanvasMode = .scene2D
-    @State private var layerSpacing: Float = 30
-    @State private var showLabels: Bool = true
+    @State private var layerSpacing: Float = Self.defaultLayerSpacing
+    @State private var showLabels: Bool = Self.defaultShowLabels
     @State private var showGrid: Bool = false
     @State private var gridInterval: CGFloat = 8
+
+    static let defaultLayerSpacing: Float = 30
+    static let defaultShowLabels: Bool = true
     /// Bright-ish blue at 50% alpha. A neutral gray (0.22 alpha) looked
     /// invisible in practice on mid-tone UI, and thin lines vanish into any
     /// background they happen to share a luminance with. Designers can always
@@ -58,40 +61,41 @@ struct SceneViewContainer: View {
     )
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            canvas
-
-            HStack(spacing: 16) {
-                ModeSegmentedControl(mode: $mode)
-                if mode == .scene3D {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.up.and.down.text.horizontal")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Slider(value: $layerSpacing, in: 0...80, step: 1)
-                            .frame(width: 120)
-                        Text("\(Int(layerSpacing))")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, alignment: .trailing)
+        // `.overlay` (instead of `ZStack`) so the floating toolbar's
+        // intrinsic width does NOT propagate as the canvas's minimum
+        // width. ZStack sizes itself to the largest child, which made
+        // the bottom toolbar's fixed-size segments (and previously the
+        // 3D slider / grid menu) ratchet up the detail column's min
+        // width. Switching modes then visibly shifted the sidebar and
+        // inspector, because the 3D toolbar was 28pt wider than the 2D
+        // toolbar and that delta surfaced as a window-min jump every
+        // time the user toggled modes. With `.overlay` the toolbar
+        // floats over the canvas without being a layout participant.
+        // The canvas is given a comfortable 2D-mode min via the
+        // window-level `frame(minWidth:)` in `AppInspectorMain`, not
+        // here — `frame(minWidth:)` on the detail content does NOT
+        // propagate up to the window's effective minimum, it just
+        // squeezes the sidebar / inspector columns below their
+        // declared mins when the window is dragged narrower.
+        canvas
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 12) {
+                    ModeSegmentedControl(mode: $mode)
+                    if mode == .scene3D {
+                        Scene3DOptionsButton(
+                            layerSpacing: $layerSpacing,
+                            showLabels: $showLabels,
+                            showGrid: $showGrid,
+                            gridInterval: $gridInterval,
+                            gridColor: $gridColor
+                        )
                     }
-                    Toggle(isOn: $showLabels) {
-                        Image(systemName: "tag")
-                            .font(.caption)
-                    }
-                    .toggleStyle(.checkbox)
-                    GridToolbarControl(
-                        isOn: $showGrid,
-                        interval: $gridInterval,
-                        color: $gridColor
-                    )
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .padding(12)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-            .padding(12)
-        }
     }
 
     @ViewBuilder
@@ -143,60 +147,108 @@ private struct ModeSegmentedControl: View {
     }
 }
 
-// MARK: - Grid Toolbar Control
+// MARK: - 3D Options Popover
 
-/// Compact control that toggles the scene-wide alignment grid and picks the
-/// spacing preset. Click toggles on/off (mirrors the adjacent label checkbox);
-/// the chevron opens the interval picker. Picking a new interval also turns
-/// the grid on so the change is immediately visible — matches how designers
-/// expect "choose 8pt" to imply "show 8pt".
-private struct GridToolbarControl: View {
-    @Binding var isOn: Bool
-    @Binding var interval: CGFloat
-    @Binding var color: Color
+/// Single inline button that opens a popover containing every 3D-mode-only
+/// control (layer spacing, label visibility, grid). Used in place of inlining
+/// these controls in the bottom toolbar — the inline form's fixed-width
+/// children (`Slider.frame(width: 120)`, `.fixedSize()` menus) propagated as
+/// a ~390pt minimum width on the canvas, which forced the navigation split
+/// view to squeeze sidebar and inspector below their declared min widths.
+/// The popover keeps the inline toolbar at the 2D-mode width profile while
+/// preserving direct-manipulation slider / color picker controls that don't
+/// fit cleanly into a Menu.
+private struct Scene3DOptionsButton: View {
+    @Binding var layerSpacing: Float
+    @Binding var showLabels: Bool
+    @Binding var showGrid: Bool
+    @Binding var gridInterval: CGFloat
+    @Binding var gridColor: Color
+    @State private var isPresented: Bool = false
 
     private static let intervalPresets: [CGFloat] = [4, 8, 16]
 
     var body: some View {
-        Menu {
-            Toggle("Show grid", isOn: $isOn)
-            Section("Interval") {
-                ForEach(Self.intervalPresets, id: \.self) { pt in
-                    Button {
-                        interval = pt
-                        if !isOn { isOn = true }
-                    } label: {
-                        HStack {
-                            Text("\(Int(pt)) pt")
-                            if interval == pt {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            }
-            Section("Color") {
-                // `supportsOpacity: true` lets designers dial the grid down on
-                // busy content without having to pick a different hue. System
-                // color panel opens outside the menu, so the menu stays
-                // navigable.
-                ColorPicker("Color", selection: $color, supportsOpacity: true)
-            }
+        Button {
+            isPresented.toggle()
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "square.grid.3x3")
-                    .font(.caption)
-                    .foregroundStyle(isOn ? Color.accentColor : .secondary)
-                Text("\(Int(interval))pt")
-                    .font(.caption.monospacedDigit())
+            Image(systemName: "slider.horizontal.3")
+                .symbolRenderingMode(.hierarchical)
+                .font(.body)
+                .foregroundStyle(activeTint ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.borderless)
+        .help("3D display options")
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 14) {
+                layerSpacingRow
+                Toggle(isOn: $showLabels) {
+                    Label("Show Labels", systemImage: "tag")
+                }
+                .toggleStyle(.checkbox)
+                Divider()
+                Toggle(isOn: $showGrid) {
+                    Label("Show Grid", systemImage: "square.grid.3x3")
+                }
+                .toggleStyle(.checkbox)
+                intervalRow
+                ColorPicker("Color", selection: $gridColor, supportsOpacity: true)
+            }
+            .padding(16)
+            .frame(width: 240)
+        }
+    }
+
+    /// Lights the trigger icon when any non-default option is active so the
+    /// user gets a hint that there's something to peek at without having to
+    /// open the popover. Defaults are pulled from `SceneViewContainer` so a
+    /// single source of truth governs both the initial `@State` value and
+    /// what counts as "non-default".
+    private var activeTint: Bool {
+        showGrid
+            || showLabels != SceneViewContainer.defaultShowLabels
+            || layerSpacing != SceneViewContainer.defaultLayerSpacing
+    }
+
+    private var layerSpacingRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.and.down.text.horizontal")
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+                Text("Layer Spacing")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text("\(Int(layerSpacing)) pt")
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-        } primaryAction: {
-            isOn.toggle()
+            Slider(value: $layerSpacing, in: 0...80, step: 1)
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help(isOn ? "Hide \(Int(interval))pt grid" : "Show \(Int(interval))pt grid")
+    }
+
+    private var intervalRow: some View {
+        HStack {
+            Text("Interval")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+            // Auto-enabling `showGrid` on interval pick (the old inline
+            // GridToolbarControl behavior) doesn't fit here: the
+            // dedicated `Show Grid` toggle sits one row up in the same
+            // popover, so users already have a clear, always-fires path.
+            // `Picker(.segmented)` on macOS also drops the action when
+            // re-tapping the already-selected segment, which would have
+            // made the implicit auto-enable silently inconsistent.
+            Picker("", selection: $gridInterval) {
+                ForEach(Self.intervalPresets, id: \.self) { pt in
+                    Text("\(Int(pt))").tag(pt)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
     }
 }
 

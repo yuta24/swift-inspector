@@ -28,7 +28,13 @@ struct AppInspectorMain: App {
                 .environmentObject(model)
                 .environmentObject(crashPresenter)
                 .environmentObject(figmaModel)
-                .frame(minWidth: 960, minHeight: 600)
+                // SwiftUI's `NavigationSplitView` doesn't propagate
+                // detail-column content min widths up to the window's
+                // effective min, so the floor for "2D Figma toolbar
+                // doesn't visibly squeeze" has to be enforced here at
+                // the window level. Computed from the column-width
+                // constants so the two stay in sync if they're tuned.
+                .frame(minWidth: WindowLayout.minWidth, minHeight: 600)
                 .onAppear {
                     model.startBrowsing()
                     appDelegate.model = model

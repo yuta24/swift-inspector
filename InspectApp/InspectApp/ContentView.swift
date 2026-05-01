@@ -6,6 +6,35 @@ import os.log
 
 private let contentLogger = Logger(subsystem: "swift-inspector", category: "content")
 
+// MARK: - Window Layout Constants
+
+/// Column-width budget shared between `ContentView` (sidebar / inspector
+/// `*ColumnWidth` modifiers) and `AppInspectorMain` (window `frame(minWidth:)`).
+/// The two have to agree because `NavigationSplitView` doesn't propagate
+/// detail-content min widths up to the window's effective minimum — if they
+/// drifted, the window would either let columns squeeze below their declared
+/// mins (sidebar/inspector clipping) or the 2D Figma toolbar would render in
+/// a canvas too narrow to be usable.
+enum WindowLayout {
+    /// Sidebar splitter min/ideal. Min keeps the device picker + tree usable;
+    /// ideal is what the user sees on first launch.
+    static let sidebarMin: CGFloat = 260
+    static let sidebarIdeal: CGFloat = 300
+    /// Inspector min/ideal/max. Max caps it so a wide window doesn't
+    /// dedicate half the screen to the inspector column.
+    static let inspectorMin: CGFloat = 280
+    static let inspectorIdeal: CGFloat = 320
+    static let inspectorMax: CGFloat = 420
+    /// Floor for the canvas area so the 2D-mode `Figma2DToolbar` (URL field +
+    /// buttons + status banners) doesn't visibly squeeze. Same value applies
+    /// in 3D — applying it only in 2D would re-introduce a mode-switch
+    /// width jump.
+    static let canvasMin: CGFloat = 420
+    /// Window minimum = sum of the column ideals + canvas floor. Computed
+    /// rather than written so retuning a single constant updates the rest.
+    static var minWidth: CGFloat { sidebarIdeal + canvasMin + inspectorIdeal }
+}
+
 /// Modal alert shown after a failed drop. Lives outside `ContentView`
 /// because the drop's async tail runs without a `View` instance.
 @MainActor
@@ -27,7 +56,10 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300)
+                .navigationSplitViewColumnWidth(
+                    min: WindowLayout.sidebarMin,
+                    ideal: WindowLayout.sidebarIdeal
+                )
         } detail: {
             DetailContentView(
                 roots: model.displayRoots,
@@ -62,7 +94,11 @@ struct ContentView: View {
                 selectedNodeID: $model.selectedNodeID,
                 measurementReferenceID: $model.measurementReferenceID
             )
-            .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            .inspectorColumnWidth(
+                min: WindowLayout.inspectorMin,
+                ideal: WindowLayout.inspectorIdeal,
+                max: WindowLayout.inspectorMax
+            )
         }
         .sheet(isPresented: crashSheetBinding) {
             CrashReportSheet(
