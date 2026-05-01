@@ -30,6 +30,12 @@ enum WindowLayout {
     /// in 3D — applying it only in 2D would re-introduce a mode-switch
     /// width jump.
     static let canvasMin: CGFloat = 420
+    /// Top inset added inside the sidebar's custom-`VStack` root so the
+    /// first header row clears the unified toolbar (traffic lights + title +
+    /// toolbar items). Tied to `.windowToolbarStyle(.unified(showsTitle: true))`
+    /// in `AppInspectorMain` — if that style changes (e.g. to `.unified()`
+    /// without title or `.expanded`), revisit this value too.
+    static let sidebarTopInset: CGFloat = 28
     /// Window minimum = sum of the column ideals + canvas floor. Computed
     /// rather than written so retuning a single constant updates the rest.
     static var minWidth: CGFloat { sidebarIdeal + canvasMin + inspectorIdeal }
@@ -326,6 +332,20 @@ private struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // The sidebar's column extends to the very top of the
+            // window, with the unified toolbar (traffic lights, title,
+            // toolbar items) overlaid on top of its background. A
+            // custom-`VStack`-rooted sidebar — unlike a `List`-rooted
+            // one — does not automatically inset its first row below
+            // that toolbar, which left the device-picker iPhone icon
+            // and status dot rendered behind the traffic lights and
+            // the offline bundle's filename pressed up against them.
+            // An explicit top inset keeps the first header clear of
+            // the toolbar regardless of which header (`OfflineBundleBar`
+            // or `DevicePickerBar`) is showing. The height is named
+            // in `WindowLayout` so its coupling with the window's
+            // toolbar style stays discoverable.
+            Color.clear.frame(height: WindowLayout.sidebarTopInset)
             // Offline mode and live-device mode are mutually exclusive
             // (see `loadOfflineBundle` / `connect(to:)`), so swap the
             // header in place rather than stacking — keeps the sidebar
