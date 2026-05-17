@@ -34,10 +34,9 @@ private let logger = Logger(subsystem: "swift-inspector", category: "server")
 ///   Local Network permission prompt the first time the listener starts.
 ///   Without this key, ``start(serviceName:)`` succeeds but the OS blocks
 ///   the listener from accepting connections.
-///
-/// `NSBonjourServices` is **not** required on the publishing side — that
-/// declaration only gates `NWBrowser` (the macOS client side), and macOS
-/// itself does not enforce it.
+/// - `NSBonjourServices`: must include `_swift-inspector._tcp`. Without
+///   this key, iOS 14+ never shows the Local Network permission dialog and
+///   the app never appears under Settings → Privacy → Local Network.
 public enum InspectServer {
     /// Serializes access to the `listener` slot so two threads racing on
     /// `start()` / `stop()` can't both observe `nil` and install duplicate

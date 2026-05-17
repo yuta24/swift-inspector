@@ -44,10 +44,14 @@ so the host app must declare a usage string:
 The string is shown verbatim in the Local Network permission prompt —
 write something your designers / QA team will recognize.
 
-`NSBonjourServices` is **not** required on this side. That key only
-restricts apps that *browse* for Bonjour services (the macOS client),
-and macOS itself does not enforce it. Publishing a service with
-`NWListener` works as long as Local Network access is granted.
+`NSBonjourServices` も追加してください。iOS 14 以降では、このキーがないとローカルネットワーク権限ダイアログが表示されず、設定アプリにもアプリが登録されません：
+
+```xml
+<key>NSBonjourServices</key>
+<array>
+    <string>_swift-inspector._tcp</string>
+</array>
+```
 
 If you only ship the inspector to internal builds (recommended — see
 [privacy.md](privacy.md)), you can scope this key to those configurations
