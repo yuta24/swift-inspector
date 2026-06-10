@@ -34,6 +34,11 @@ enum LiveTransport: Equatable {
 /// highlight push) that need to coordinate between the two helpers.
 @MainActor
 final class AppInspectorModel: ObservableObject {
+    private struct StoredManualEndpoint: Codable, Equatable {
+        let host: String
+        let port: UInt16
+    }
+
     @Published var discovered: [InspectEndpoint] = []
     /// User-typed endpoints that bypassed Bonjour discovery — added via
     /// the "Connect by IP" sheet for environments where mDNS is blocked
@@ -41,11 +46,6 @@ final class AppInspectorModel: ObservableObject {
     /// outside `discovered` so the browser's periodic refresh doesn't
     /// wipe them, and so the UI can mark them visually.
     ///
-    /// In-memory only for now — daily designer/QA flows on the same
-    /// corp network will re-type the same IP every launch. TODO:
-    /// persist across launches (UserDefaults keyed by host:port,
-    /// pruned when stale) once we have a clear UI surface for
-    /// removing entries the user no longer wants.
     @Published private(set) var manualEndpoints: [InspectEndpoint] = []
     @Published var roots: [ViewNode] = []
     @Published var selectedEndpointID: InspectEndpoint.ID?
@@ -124,6 +124,7 @@ final class AppInspectorModel: ObservableObject {
         send: { [weak self] message in self?.connection.send(message) },
         requestSnapshot: { [weak self] in self?.requestHierarchy(lite: true) }
     )
+    private let userDefaults: UserDefaults
 
     private var highlightCancellable: AnyCancellable?
     /// Wall-clock time of the last `requestHierarchy` send. If a response
@@ -194,7 +195,9 @@ final class AppInspectorModel: ObservableObject {
         }
     }
 
-    init() {
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        manualEndpoints = Self.loadManualEndpoints(from: userDefaults)
         wireConnectionCallbacks()
         wireLiveCallbacks()
         wireHighlightSubscription()
@@ -226,6 +229,39 @@ final class AppInspectorModel: ObservableObject {
     /// endpoint that would fail at NWConnection construction time.
     @discardableResult
     func addManualEndpoint(host: String, port: UInt16) -> InspectEndpoint.ID? {
+        guard let endpoint = Self.makeManualEndpoint(host: host, port: port) else {
+            return nil
+        }
+        // Idempotent re-add: typing the same host:port twice should
+        // surface the existing entry, not duplicate it.
+        if let existing = manualEndpoints.first(where: { $0.id == endpoint.id }) {
+            return existing.id
+        }
+        manualEndpoints.append(endpoint)
+        persistManualEndpoints()
+        return endpoint.id
+    }
+
+    /// Removes a previously-added manual endpoint. No-op for ids that
+    /// don't exist or point at the active connection.
+    func removeManualEndpoint(id: InspectEndpoint.ID) {
+        // Avoid leaving the UI connected to an endpoint that disappeared
+        // from the picker. The menu disables this path, but keeping the
+        // model defensive makes tests and future callers predictable.
+        guard id != connectedEndpointID,
+              !(isConnecting && selectedEndpointID == id),
+              !(isAwaitingPairApproval && selectedEndpointID == id),
+              manualEndpoints.first(where: { $0.id == id })?.isConnected != true else {
+            return
+        }
+        manualEndpoints.removeAll { $0.id == id }
+        if selectedEndpointID == id {
+            selectedEndpointID = nil
+        }
+        persistManualEndpoints()
+    }
+
+    private static func makeManualEndpoint(host: String, port: UInt16) -> InspectEndpoint? {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty,
               let nwPort = NWEndpoint.Port(rawValue: port) else {
@@ -247,25 +283,43 @@ final class AppInspectorModel: ObservableObject {
         let isIPv6 = bareHost.contains(":")
         let displayHost = isIPv6 ? "[\(bareHost)]" : bareHost
         let id = "manual:\(displayHost):\(port)"
-        // Idempotent re-add: typing the same host:port twice should
-        // surface the existing entry, not duplicate it.
-        if let existing = manualEndpoints.first(where: { $0.id == id }) {
-            return existing.id
-        }
-        let endpoint = InspectEndpoint(
+        return InspectEndpoint(
             id: id,
             name: "\(displayHost):\(port)",
             endpoint: NWEndpoint.hostPort(host: NWEndpoint.Host(bareHost), port: nwPort)
         )
-        manualEndpoints.append(endpoint)
-        return endpoint.id
     }
 
-    /// Removes a previously-added manual endpoint. No-op for ids that
-    /// don't exist; not exposed as a UI action yet but tests and a
-    /// future "remove from list" affordance need a clean entry point.
-    func removeManualEndpoint(id: InspectEndpoint.ID) {
-        manualEndpoints.removeAll { $0.id == id }
+    private static func loadManualEndpoints(from userDefaults: UserDefaults) -> [InspectEndpoint] {
+        guard let data = userDefaults.data(forKey: UserPreferences.Keys.manualEndpoints),
+              let stored = try? JSONDecoder().decode([StoredManualEndpoint].self, from: data) else {
+            return []
+        }
+        var seen: Set<InspectEndpoint.ID> = []
+        var endpoints: [InspectEndpoint] = []
+        for item in stored {
+            guard let endpoint = makeManualEndpoint(host: item.host, port: item.port),
+                  !seen.contains(endpoint.id) else {
+                continue
+            }
+            seen.insert(endpoint.id)
+            endpoints.append(endpoint)
+        }
+        return endpoints
+    }
+
+    private func persistManualEndpoints() {
+        let stored = manualEndpoints.compactMap(Self.storedManualEndpoint)
+        if let data = try? JSONEncoder().encode(stored) {
+            userDefaults.set(data, forKey: UserPreferences.Keys.manualEndpoints)
+        }
+    }
+
+    private static func storedManualEndpoint(from endpoint: InspectEndpoint) -> StoredManualEndpoint? {
+        guard case let .hostPort(host, port) = endpoint.endpoint else {
+            return nil
+        }
+        return StoredManualEndpoint(host: String(describing: host), port: port.rawValue)
     }
 
     func connect(to endpoint: InspectEndpoint) {

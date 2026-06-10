@@ -13,6 +13,10 @@ enum UserPreferences {
         /// usually compare against the same screen multiple times in a row,
         /// so we pre-fill the field rather than ask them to re-paste.
         static let figmaLastFrameURL = "figmaLastFrameURL"
+        /// Recent endpoints added through "Connect by IP…". Stored as a
+        /// compact Codable array so Bonjour-hostile networks don't force
+        /// users to re-type the same address every launch.
+        static let manualEndpoints = "manualEndpoints"
     }
 
     /// JPEG compression quality the macOS client asks the device to use for

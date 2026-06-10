@@ -609,6 +609,7 @@ private struct DevicePickerBar: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                ManualEndpointHistoryMenu()
                 Button {
                     showsManualSheet = true
                 } label: {
@@ -683,6 +684,40 @@ private struct DevicePickerBar: View {
             return .red
         }
         return .secondary
+    }
+}
+
+// MARK: - Manual Endpoint History
+
+private struct ManualEndpointHistoryMenu: View {
+    @EnvironmentObject var model: AppInspectorModel
+
+    var body: some View {
+        if !model.manualEndpoints.isEmpty {
+            Menu {
+                ForEach(model.manualEndpoints) { endpoint in
+                    Button(role: .destructive) {
+                        model.removeManualEndpoint(id: endpoint.id)
+                    } label: {
+                        Label(endpoint.name, systemImage: "trash")
+                    }
+                    .disabled(isDeletionDisabled(for: endpoint))
+                }
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .controlSize(.small)
+            .help("Remove saved IP connections")
+        }
+    }
+
+    private func isDeletionDisabled(for endpoint: InspectEndpoint) -> Bool {
+        endpoint.id == model.connectedEndpointID
+            || endpoint.isConnected
+            || ((model.isConnecting || model.isAwaitingPairApproval)
+                && model.selectedEndpointID == endpoint.id)
     }
 }
 
