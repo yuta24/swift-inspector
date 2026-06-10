@@ -35,7 +35,9 @@ struct MyApp: App {
 ```
 
 You also need an `NSLocalNetworkUsageDescription` string in `Info.plist`
-so iOS will allow the listener to accept connections. See
+so iOS will allow the listener to accept connections. `NSBonjourServices`
+is not required in the inspected iOS app; that key only applies to apps
+that browse for Bonjour services. See
 [docs/integration.md](docs/integration.md) for the full setup including
 the build flag that gates inspection out of App Store releases.
 
