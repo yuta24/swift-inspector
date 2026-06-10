@@ -199,7 +199,11 @@ final class FigmaComparisonModel: ObservableObject {
     func match(for viewNode: ViewNode) -> FigmaLayerMatcher.Match? {
         if let cached = matches[viewNode.ident] { return cached }
         guard let layerTree else { return nil }
-        return FigmaLayerMatcher(frame: layerTree).match(viewNode: viewNode)
+        guard let match = FigmaLayerMatcher(frame: layerTree).match(viewNode: viewNode),
+              isDisplayable(match) else {
+            return nil
+        }
+        return match
     }
 
     /// Diff between a ViewNode and its matched Figma layer. Reads from
@@ -248,7 +252,7 @@ final class FigmaComparisonModel: ObservableObject {
         diffs: inout [UUID: FigmaDiff],
         differing: inout Set<UUID>
     ) {
-        if let match = matcher.match(viewNode: node) {
+        if let match = matcher.match(viewNode: node), isDisplayable(match) {
             matches[node.ident] = match
             let diff = FigmaDiffEngine.diff(viewNode: node, figmaLayer: match.layer)
             diffs[node.ident] = diff
@@ -265,6 +269,10 @@ final class FigmaComparisonModel: ObservableObject {
                 differing: &differing
             )
         }
+    }
+
+    private func isDisplayable(_ match: FigmaLayerMatcher.Match) -> Bool {
+        match.confidence >= .medium
     }
 
     /// Recomputes `sizeWarning` whenever the inspector's selected device

@@ -92,6 +92,149 @@ final class FigmaDiffTests: XCTestCase {
         XCTAssertEqual(fill?.figma, "Gradient")
     }
 
+    func testStrokeDiffUsesBorderProperties() {
+        let device = ViewNode(
+            className: "UIView",
+            frame: .zero,
+            borderWidth: 2,
+            borderColor: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
+        )
+        let figma = FigmaNode(
+            id: "1", name: "x", type: "RECTANGLE",
+            strokes: [
+                FigmaNode.Paint(
+                    type: "SOLID",
+                    color: FigmaNode.Color(r: 1, g: 0, b: 0, a: 1),
+                    opacity: 1,
+                    visible: true
+                )
+            ],
+            strokeWeight: 2
+        )
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke" }?.status, .match)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke width" }?.status, .match)
+    }
+
+    func testDeviceOnlyStrokeIsMarkedAsDifference() {
+        let device = ViewNode(
+            className: "UIView",
+            frame: .zero,
+            borderWidth: 2,
+            borderColor: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
+        )
+        let figma = FigmaNode(id: "1", name: "x", type: "RECTANGLE")
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke" }?.status, .differ)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke width" }?.status, .differ)
+        XCTAssertTrue(diff.hasDifference)
+    }
+
+    func testFigmaOnlyStrokeIsMarkedAsDifference() {
+        let device = ViewNode(className: "UIView", frame: .zero)
+        let figma = FigmaNode(
+            id: "1", name: "x", type: "RECTANGLE",
+            strokes: [
+                FigmaNode.Paint(
+                    type: "SOLID",
+                    color: FigmaNode.Color(r: 0, g: 0, b: 0, a: 1),
+                    opacity: 1,
+                    visible: true
+                )
+            ],
+            strokeWeight: 1
+        )
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke" }?.status, .differ)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke width" }?.status, .differ)
+        XCTAssertTrue(diff.hasDifference)
+    }
+
+    func testHiddenFigmaStrokeWithDeviceBorderIsMarkedAsDifference() {
+        let device = ViewNode(
+            className: "UIView",
+            frame: .zero,
+            borderWidth: 2,
+            borderColor: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
+        )
+        let figma = FigmaNode(
+            id: "1", name: "x", type: "RECTANGLE",
+            strokes: [
+                FigmaNode.Paint(
+                    type: "SOLID",
+                    color: FigmaNode.Color(r: 1, g: 0, b: 0, a: 1),
+                    opacity: 1,
+                    visible: false
+                )
+            ],
+            strokeWeight: 2
+        )
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke" }?.status, .differ)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke width" }?.status, .differ)
+    }
+
+    func testUnsupportedFigmaStrokeRemainsUnavailable() {
+        let device = ViewNode(
+            className: "UIView",
+            frame: .zero,
+            borderWidth: 2,
+            borderColor: RGBAColor(red: 1, green: 0, blue: 0, alpha: 1)
+        )
+        let figma = FigmaNode(
+            id: "1", name: "x", type: "RECTANGLE",
+            strokes: [
+                FigmaNode.Paint(type: "GRADIENT_LINEAR", color: nil, opacity: 1, visible: true)
+            ],
+            strokeWeight: 2
+        )
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke" }?.status, .unavailable)
+        XCTAssertEqual(diff.items.first { $0.label == "Stroke width" }?.status, .unavailable)
+        XCTAssertFalse(diff.hasDifference)
+    }
+
+    func testTextLayerFillComparesAgainstTextColorNotBackgroundColor() {
+        let device = ViewNode(
+            className: "UILabel",
+            frame: .zero,
+            backgroundColor: nil,
+            typography: Typography(
+                fontName: "SFPro-Regular",
+                pointSize: 17,
+                textColor: RGBAColor(red: 0, green: 0, blue: 0, alpha: 1),
+                alignment: "center"
+            )
+        )
+        let figma = FigmaNode(
+            id: "1", name: "x", type: "TEXT",
+            fills: [
+                FigmaNode.Paint(
+                    type: "SOLID",
+                    color: FigmaNode.Color(r: 0, g: 0, b: 0, a: 1),
+                    opacity: 1,
+                    visible: true
+                )
+            ],
+            style: FigmaNode.TextStyle(
+                fontFamily: nil,
+                fontPostScriptName: nil,
+                fontWeight: nil,
+                fontSize: 17,
+                lineHeightPx: nil,
+                lineHeightPercent: nil,
+                lineHeightUnit: nil,
+                letterSpacing: nil,
+                textAlignHorizontal: "CENTER"
+            ),
+            characters: "x"
+        )
+        let diff = FigmaDiffEngine.diff(viewNode: device, figmaLayer: figma)
+        XCTAssertNil(diff.items.first { $0.label == "Fill" })
+        XCTAssertEqual(diff.items.first { $0.label == "Text color" }?.status, .match)
+        XCTAssertEqual(diff.items.first { $0.label == "Text alignment" }?.status, .match)
+    }
+
     func testCornerRadiusUsesPerCornerMaximum() {
         let device = ViewNode(className: "UIView", frame: .zero, cornerRadius: 12)
         let figma = FigmaNode(
@@ -150,4 +293,3 @@ final class FigmaDiffTests: XCTestCase {
         XCTAssertTrue(diff.items.allSatisfy { $0.category != .typography })
     }
 }
-

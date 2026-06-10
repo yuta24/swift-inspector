@@ -87,6 +87,12 @@ struct FigmaNode: Decodable, Equatable {
         fills?.first { $0.type == "SOLID" && $0.visible != false }
     }
 
+    /// First visible SOLID stroke, if any. Used to compare Figma strokes
+    /// against `ViewNode.borderColor`.
+    var primarySolidStroke: Paint? {
+        strokes?.first { $0.type == "SOLID" && $0.visible != false }
+    }
+
     /// Pre-order flattening of this subtree — handy for matchers that
     /// need to look up layers by id or name without walking the tree on
     /// every query.

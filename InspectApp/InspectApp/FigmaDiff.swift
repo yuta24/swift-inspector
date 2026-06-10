@@ -25,6 +25,7 @@ struct FigmaDiff: Equatable {
     enum Category: String, Equatable, CaseIterable {
         case size
         case fill
+        case stroke
         case cornerRadius
         case typography
     }
@@ -54,7 +55,9 @@ struct FigmaDiff: Equatable {
 
     static let widthHeightTolerance: Double = 0.5
     static let radiusTolerance: Double = 0.5
+    static let strokeWidthTolerance: Double = 0.5
     static let fontSizeTolerance: Double = 0.25
+    static let lineHeightTolerance: Double = 1
     static let colorComponentTolerance: Double = 0.012  // ~1/85, matches an HEX-byte diff
 }
 
@@ -66,7 +69,10 @@ enum FigmaDiffEngine {
     static func diff(viewNode: ViewNode, figmaLayer: FigmaNode) -> FigmaDiff {
         var items: [FigmaDiff.Item] = []
         items.append(contentsOf: sizeItems(viewNode: viewNode, figmaLayer: figmaLayer))
-        items.append(fillItem(viewNode: viewNode, figmaLayer: figmaLayer))
+        if figmaLayer.type != "TEXT" {
+            items.append(fillItem(viewNode: viewNode, figmaLayer: figmaLayer))
+        }
+        items.append(contentsOf: strokeItems(viewNode: viewNode, figmaLayer: figmaLayer))
         items.append(cornerRadiusItem(viewNode: viewNode, figmaLayer: figmaLayer))
         items.append(contentsOf: typographyItems(viewNode: viewNode, figmaLayer: figmaLayer))
         return FigmaDiff(items: items)
@@ -160,7 +166,11 @@ enum FigmaDiffEngine {
     }
 
     private static func figmaFillKindLabel(_ node: FigmaNode) -> String {
-        guard let first = node.fills?.first else { return "—" }
+        paintKindLabel(node.fills?.first)
+    }
+
+    private static func paintKindLabel(_ paint: FigmaNode.Paint?) -> String {
+        guard let first = paint else { return "—" }
         switch first.type {
         case "GRADIENT_LINEAR", "GRADIENT_RADIAL", "GRADIENT_ANGULAR", "GRADIENT_DIAMOND":
             return String(localized: "Gradient")
@@ -171,6 +181,94 @@ enum FigmaDiffEngine {
         default:
             return first.type
         }
+    }
+
+    // MARK: - Stroke
+
+    private static func strokeItems(
+        viewNode: ViewNode,
+        figmaLayer: FigmaNode
+    ) -> [FigmaDiff.Item] {
+        let colorLabel = String(localized: "Stroke")
+        let widthLabel = String(localized: "Stroke width")
+        let deviceColor = viewNode.borderColor
+        let deviceWidth = viewNode.borderWidth
+
+        guard let solid = figmaLayer.primarySolidStroke, let figmaColor = solid.color else {
+            let hasUnsupportedFigmaStroke = figmaLayer.strokes?.contains { stroke in
+                stroke.visible != false && stroke.type != "SOLID"
+            } ?? false
+            let hasDeviceStroke = deviceWidth > FigmaDiff.strokeWidthTolerance
+            if hasUnsupportedFigmaStroke {
+                return [
+                    FigmaDiff.Item(
+                        category: .stroke, label: colorLabel,
+                        figma: paintKindLabel(figmaLayer.strokes?.first { $0.visible != false }),
+                        device: deviceColor.map(rgbaHex) ?? "—",
+                        status: .unavailable
+                    ),
+                    FigmaDiff.Item(
+                        category: .stroke, label: widthLabel,
+                        figma: figmaLayer.strokeWeight.map(format),
+                        device: format(deviceWidth),
+                        status: .unavailable
+                    ),
+                ]
+            }
+            if hasDeviceStroke {
+                return [
+                    FigmaDiff.Item(
+                        category: .stroke, label: colorLabel,
+                        figma: "—",
+                        device: deviceColor.map(rgbaHex) ?? "—",
+                        status: deviceColor == nil ? .unavailable : .differ
+                    ),
+                    FigmaDiff.Item(
+                        category: .stroke, label: widthLabel,
+                        figma: "0",
+                        device: format(deviceWidth),
+                        status: numericStatus(0, deviceWidth, tolerance: FigmaDiff.strokeWidthTolerance)
+                    ),
+                ]
+            }
+            return []
+        }
+
+        let figmaEffectiveAlpha = figmaColor.a * (solid.opacity ?? 1)
+        let figmaHex = hexString(
+            r: figmaColor.r, g: figmaColor.g, b: figmaColor.b, a: figmaEffectiveAlpha
+        )
+        let colorStatus: FigmaDiff.Status
+        let deviceHex: String?
+        if let deviceColor {
+            let deviceEffectiveAlpha = deviceColor.alpha * viewNode.alpha
+            colorStatus = colorsMatch(
+                r1: deviceColor.red, g1: deviceColor.green, b1: deviceColor.blue, a1: deviceEffectiveAlpha,
+                r2: figmaColor.r, g2: figmaColor.g, b2: figmaColor.b, a2: figmaEffectiveAlpha
+            ) ? .match : .differ
+            deviceHex = hexString(
+                r: deviceColor.red, g: deviceColor.green, b: deviceColor.blue, a: deviceEffectiveAlpha
+            )
+        } else {
+            colorStatus = .differ
+            deviceHex = "nil"
+        }
+
+        let figmaWidth = figmaLayer.strokeWeight ?? 1
+        return [
+            FigmaDiff.Item(
+                category: .stroke, label: colorLabel,
+                figma: figmaHex,
+                device: deviceHex,
+                status: colorStatus
+            ),
+            FigmaDiff.Item(
+                category: .stroke, label: widthLabel,
+                figma: format(figmaWidth),
+                device: format(deviceWidth),
+                status: numericStatus(figmaWidth, deviceWidth, tolerance: FigmaDiff.strokeWidthTolerance)
+            ),
+        ]
     }
 
     // MARK: - Corner radius
@@ -242,17 +340,66 @@ enum FigmaDiffEngine {
             ))
         }
 
+        if let textColorItem = textColorItem(viewNode: viewNode, figmaLayer: figmaLayer) {
+            items.append(textColorItem)
+        }
+
+        if let figmaAlignment = figmaStyle.textAlignHorizontal,
+           let deviceAlignment = typography.alignment {
+            items.append(FigmaDiff.Item(
+                category: .typography, label: String(localized: "Text alignment"),
+                figma: alignmentLabel(figmaAlignment),
+                device: alignmentLabel(deviceAlignment),
+                status: alignmentStatus(figmaAlignment, deviceAlignment)
+            ))
+        }
+
         if let figmaLineHeight = computedLineHeightPx(figmaStyle, fontSize: figmaStyle.fontSize),
            let deviceLineHeight = typography.lineHeight {
             items.append(FigmaDiff.Item(
                 category: .typography, label: String(localized: "Line height"),
                 figma: "\(format(figmaLineHeight))pt",
                 device: "\(format(deviceLineHeight))pt",
-                status: numericStatus(figmaLineHeight, deviceLineHeight, tolerance: 1)
+                status: numericStatus(figmaLineHeight, deviceLineHeight, tolerance: FigmaDiff.lineHeightTolerance)
             ))
         }
 
         return items
+    }
+
+    private static func textColorItem(
+        viewNode: ViewNode,
+        figmaLayer: FigmaNode
+    ) -> FigmaDiff.Item? {
+        guard let typography = viewNode.typography,
+              let solid = figmaLayer.primarySolidFill,
+              let figmaColor = solid.color else {
+            return nil
+        }
+        let figmaEffectiveAlpha = figmaColor.a * (solid.opacity ?? 1)
+        let figmaHex = hexString(
+            r: figmaColor.r, g: figmaColor.g, b: figmaColor.b, a: figmaEffectiveAlpha
+        )
+        guard let deviceColor = typography.textColor else {
+            return FigmaDiff.Item(
+                category: .typography, label: String(localized: "Text color"),
+                figma: figmaHex, device: nil,
+                status: .unavailable
+            )
+        }
+        let deviceEffectiveAlpha = deviceColor.alpha * viewNode.alpha
+        let status: FigmaDiff.Status = colorsMatch(
+            r1: deviceColor.red, g1: deviceColor.green, b1: deviceColor.blue, a1: deviceEffectiveAlpha,
+            r2: figmaColor.r, g2: figmaColor.g, b2: figmaColor.b, a2: figmaEffectiveAlpha
+        ) ? .match : .differ
+        return FigmaDiff.Item(
+            category: .typography, label: String(localized: "Text color"),
+            figma: figmaHex,
+            device: hexString(
+                r: deviceColor.red, g: deviceColor.green, b: deviceColor.blue, a: deviceEffectiveAlpha
+            ),
+            status: status
+        )
     }
 
     /// Resolves Figma's three line-height representations into a single
@@ -312,6 +459,31 @@ enum FigmaDiffEngine {
 
     private static func caseInsensitiveStatus(_ a: String, _ b: String) -> FigmaDiff.Status {
         a.caseInsensitiveCompare(b) == .orderedSame ? .match : .differ
+    }
+
+    private static func alignmentStatus(_ figma: String, _ device: String) -> FigmaDiff.Status {
+        normalizedAlignment(figma) == normalizedAlignment(device) ? .match : .differ
+    }
+
+    private static func alignmentLabel(_ value: String) -> String {
+        switch normalizedAlignment(value) {
+        case "left": return String(localized: "Left")
+        case "center": return String(localized: "Center")
+        case "right": return String(localized: "Right")
+        case "justified": return String(localized: "Justified")
+        default: return value
+        }
+    }
+
+    private static func normalizedAlignment(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "left": return "left"
+        case "center", "centre": return "center"
+        case "right": return "right"
+        case "justified", "justify": return "justified"
+        case "natural": return "left"
+        default: return value.lowercased()
+        }
     }
 
     private static func colorsMatch(
